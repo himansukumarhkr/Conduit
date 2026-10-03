@@ -1,14 +1,9 @@
-"""
-Conduit - Desktop Application Entrypoint
-Orchestrates PyWebView Desktop Window, IPC API Bridge, and Automation Hub.
-"""
 import os
 import sys
 import json
 import webview
 from typing import List, Dict, Any
 
-# Ensure workspace root is in sys.path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
@@ -20,16 +15,13 @@ from app.core.runner import TestRunner
 
 
 class DesktopAPI:
-    """
-    Python API bridge exposed directly to JavaScript (window.pywebview.api).
-    """
 
     def __init__(self, workspace_dir: str):
         self.workspace_dir = workspace_dir
         self.catalog = CatalogManager(workspace_dir)
         self.ast_engine = ASTNormalizer()
         self.runner = TestRunner(workspace_dir)
-        self.recorder: Optional[BrowserRecorder] = None
+        self.recorder = None
         self._current_recording_meta = {}
         self.window = None
 
@@ -37,11 +29,9 @@ class DesktopAPI:
         self.window = window
 
     def get_scenarios(self) -> List[Dict[str, Any]]:
-        """Returns all scenarios from the catalog."""
         return self.catalog.get_all_scenarios()
 
     def run_scenarios(self, scenario_ids: List[str], browser: str = "msedge", headless: bool = True, env: str = "QA"):
-        """Launches pytest execution for selected scenario IDs."""
         test_files = []
         for s_id in scenario_ids:
             sc = self.catalog.get_scenario(s_id)
@@ -79,7 +69,6 @@ class DesktopAPI:
         return {"status": "started", "tests_count": len(test_files)}
 
     def start_recording(self, scenario_name: str, start_url: str, tags: List[str], browser: str = "msedge"):
-        """Initiates a Playwright recording session with assertion overlay."""
         self._current_recording_meta = {
             "name": scenario_name,
             "url": start_url,
@@ -100,7 +89,6 @@ class DesktopAPI:
         }
 
     def stop_recording(self):
-        """Stops the recording session and synthesizes Page Objects + Pytest specs."""
         if not self.recorder or not self.recorder.is_recording:
             return {"status": "error", "message": "No active recording session"}
 
@@ -109,14 +97,12 @@ class DesktopAPI:
 
         self._log_to_ui("INFO", f"Synthesizing Page Object Model and Pytest spec for {len(actions)} action(s)...")
 
-        # Synthesize via AST Engine
         synth_result = self.ast_engine.synthesize_pom_and_test(
             scenario_name=meta.get("name", "Recorded Scenario"),
             tags=meta.get("tags", ["@smoke"]),
             actions=actions
         )
 
-        # Save to catalog & filesystem
         new_scenario = {
             "id": f"sc_{os.urandom(4).hex()}",
             "name": meta.get("name", "Recorded Scenario"),
@@ -133,7 +119,6 @@ class DesktopAPI:
         self.catalog.add_or_update_scenario(new_scenario)
         self._log_to_ui("SUCCESS", f"Synthesized Page Objects and Pytest scenario: {synth_result['file_name']}")
 
-        # Refresh UI
         self._evaluate_js("loadScenariosFromBackend();")
         return {"status": "success", "scenario": new_scenario}
 
@@ -171,7 +156,6 @@ def main():
     )
     api.set_window(window)
 
-    # Launch desktop application using Edge Chromium WebView2
     webview.start(gui="edgechromium", debug=False)
 
 

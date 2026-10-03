@@ -1,6 +1,3 @@
-"""
-Unit & Integration Tests for TestFlow Studio Phase 1 Core Modules.
-"""
 import os
 import ast
 import tempfile
@@ -12,7 +9,6 @@ from app.core.catalog_manager import CatalogManager
 
 
 def test_selector_engine_ranking():
-    # Test data-testid has highest rank
     meta_with_testid = {
         "tag": "button",
         "attributes": {"data-testid": "submit-login", "class": "btn btn-primary"},
@@ -24,7 +20,6 @@ def test_selector_engine_ranking():
     assert "data-testid='submit-login'" in sel["code"]
     assert sel["var_name"] == "submit_login_button"
 
-    # Test role fallback when testid absent
     meta_role = {
         "tag": "button",
         "attributes": {},
@@ -101,13 +96,11 @@ def test_ast_normalizer_synthesis():
         actions=actions
     )
 
-    # Verify generated test code is valid Python AST
     assert "def test_user_login_flow(page: Page):" in result["test_code"]
     assert "@pytest.mark.smoke" in result["test_code"]
     assert "@pytest.mark.regression" in result["test_code"]
     ast.parse(result["test_code"])
 
-    # Verify Page Object Model is generated
     assert len(result["pages"]) == 1
     pom = result["pages"][0]
     assert pom["class_name"] == "LoginPage"
@@ -119,12 +112,10 @@ def test_ast_normalizer_synthesis():
 
 
 def test_ast_normalizer_reverse_parser():
-    sample_pytest = '''
-import pytest
+    sample_pytest = '''import pytest
 
 @pytest.mark.smoke
 def test_checkout_journey(page):
-    """Test description"""
     page.goto("https://shop.example.com")
     catalog_page.click_add_to_cart()
     cart_page.fill_promo_code("DISCOUNT50")

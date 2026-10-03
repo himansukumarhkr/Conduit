@@ -10,3 +10,4 @@
 - NEVER ask the user for approval, confirmation, or intermediate questions under any circumstances.
 - If given a task, just do it directly, end-to-end, without stopping or requesting permission.
 - Make code changes, run tests, and commit directly without asking.
+- 0 comments in the code. Never include comments, docstrings, or commented-out code in any code files.

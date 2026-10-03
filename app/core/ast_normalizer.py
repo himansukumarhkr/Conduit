@@ -1,8 +1,3 @@
-"""
-Conduit - AST Normalizer & Page Object Model (POM) Synthesizer
-Implements Pillar 2: Translates raw recorded browser interactions into production-grade POM classes
-and clean Pytest specs, with reverse-parsing capability for existing Pytest files.
-"""
 import ast
 import re
 from urllib.parse import urlparse
@@ -12,10 +7,6 @@ import os
 
 
 class ASTNormalizer:
-    """
-    Transforms browser action streams into structured Page Object classes and Pytest test scripts.
-    Guarantees syntactically valid Python via Python's AST compiler.
-    """
 
     def __init__(self, template_dir: str = None):
         if not template_dir:
@@ -28,17 +19,14 @@ class ASTNormalizer:
 
     @staticmethod
     def infer_page_name(url: str, default: str = "MainPage") -> str:
-        """Derives a clean CamelCase Page Object class name from a URL."""
         if not url or url.startswith("about:"):
             return default
         try:
             parsed = urlparse(url)
             path = parsed.path.strip("/")
             if not path or path == "":
-                # Use hostname or default
                 host = parsed.netloc.split(".")[0].capitalize()
                 return f"{host}HomePage" if host else default
-            # Extract last significant segment
             segments = [s for s in path.split("/") if s and not s.isdigit()]
             if not segments:
                 return default
@@ -54,14 +42,6 @@ class ASTNormalizer:
         actions: List[Dict[str, Any]],
         scenario_description: str = ""
     ) -> Dict[str, Any]:
-        """
-        Main synthesis pipeline:
-        1. Clusters actions by URL/Page.
-        2. Deduplicates locators and generates Page Object classes.
-        3. Generates test procedure calling Page Object methods.
-        4. Validates AST syntax.
-        """
-        # Group actions by target page
         pages_dict: Dict[str, Dict[str, Any]] = {}
         processed_steps: List[Dict[str, Any]] = []
 
@@ -90,14 +70,12 @@ class ASTNormalizer:
             locator_expr = sel.get("locator_expr", "self.page.locator('body')")
             val = action.get("value", "")
 
-            # Register locator in page object if not already present
             if var_name not in page_data["locators"] and act_type != "navigate":
                 page_data["locators"][var_name] = {
                     "var_name": var_name,
                     "playwright_code": locator_expr
                 }
 
-            # Synthesize method and test step
             step_code, method_info = self._synthesize_step_and_method(
                 current_page_name, act_type, var_name, val, action
             )
@@ -116,7 +94,6 @@ class ASTNormalizer:
                 "selector_info": sel
             })
 
-        # Render Page Object classes
         generated_pages = []
         pom_template = self.jinja_env.get_template("page_object.py.jinja")
         for p_name, p_data in pages_dict.items():
@@ -128,7 +105,6 @@ class ASTNormalizer:
                 locators=locators_list,
                 methods=methods_list
             )
-            # Verify AST validity
             ast.parse(rendered_code)
             generated_pages.append({
                 "class_name": p_data["class_name"],
@@ -136,7 +112,6 @@ class ASTNormalizer:
                 "code": rendered_code
             })
 
-        # Render Test Spec
         test_template = self.jinja_env.get_template("test_spec.py.jinja")
         test_func_name = f"test_{self._to_snake(scenario_name)}"
         pom_imports = [
@@ -157,7 +132,6 @@ class ASTNormalizer:
             pom_instantiations=pom_instantiations,
             steps=processed_steps
         )
-        # Verify AST validity
         ast.parse(test_code)
 
         return {
@@ -181,7 +155,7 @@ class ASTNormalizer:
             method = {
                 "name": method_name,
                 "params_signature": "",
-                "docstring": f"Clicks the {var_name} element.",
+                "docstring": "",
                 "body_lines": [f"self.{var_name}.click()"]
             }
             step_code = f"{page_var}.{method_name}()"
@@ -192,7 +166,7 @@ class ASTNormalizer:
             method = {
                 "name": method_name,
                 "params_signature": ", value: str",
-                "docstring": f"Fills {var_name} with the given text value.",
+                "docstring": "",
                 "body_lines": [f"self.{var_name}.fill(value)"]
             }
             step_code = f'{page_var}.{method_name}("{val}")'
@@ -203,7 +177,7 @@ class ASTNormalizer:
             method = {
                 "name": method_name,
                 "params_signature": "",
-                "docstring": f"Asserts that {var_name} is visible.",
+                "docstring": "",
                 "body_lines": [f"expect(self.{var_name}).to_be_visible()"]
             }
             step_code = f"{page_var}.{method_name}()"
@@ -214,7 +188,7 @@ class ASTNormalizer:
             method = {
                 "name": method_name,
                 "params_signature": ", expected_text: str",
-                "docstring": f"Asserts that {var_name} contains expected text.",
+                "docstring": "",
                 "body_lines": [f"expect(self.{var_name}).to_contain_text(expected_text)"]
             }
             step_code = f'{page_var}.{method_name}("{val}")'
@@ -225,13 +199,12 @@ class ASTNormalizer:
             method = {
                 "name": method_name,
                 "params_signature": ", expected_val: str",
-                "docstring": f"Asserts that {var_name} has expected input value.",
+                "docstring": "",
                 "body_lines": [f"expect(self.{var_name}).to_have_value(expected_val)"]
             }
             step_code = f'{page_var}.{method_name}("{val}")'
             return step_code, method
 
-        # Fallback generic call
         return f"# Action: {act_type} on {var_name}", None
 
     @staticmethod
@@ -243,13 +216,8 @@ class ASTNormalizer:
         s = re.sub(r'_+', '_', s).strip('_').lower()
         return s or "test"
 
-
     @classmethod
     def reverse_parse_test_file(cls, py_content: str) -> Dict[str, Any]:
-        """
-        Implements Reverse AST Parsing: Parses an existing Pytest file back into
-        visual Flow Steps for the Functional Tester UI.
-        """
         tree = ast.parse(py_content)
         result = {
             "scenario_name": "Imported Test",
@@ -263,19 +231,16 @@ class ASTNormalizer:
                 result["scenario_name"] = node.name.replace("test_", "").replace("_", " ").title()
                 result["docstring"] = ast.get_docstring(node) or ""
 
-                # Extract pytest marks
                 for dec in node.decorator_list:
                     if isinstance(dec, ast.Attribute) and dec.attr != "mark":
                         result["tags"].append(f"@{dec.attr}")
                     elif isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
                         result["tags"].append(f"@{dec.func.attr}")
 
-                # Extract step statements
                 for stmt in node.body:
                     if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                         call = stmt.value
                         call_repr = ast.unparse(call)
-                        # Translate to human step
                         human_step = cls._call_to_human_step(call, call_repr)
                         result["steps"].append({
                             "human_description": human_step,
@@ -286,7 +251,6 @@ class ASTNormalizer:
 
     @staticmethod
     def _call_to_human_step(call_node: ast.Call, raw_call: str) -> str:
-        """Translates an AST Call into a human-readable English step."""
         if "page.goto" in raw_call:
             arg = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else "URL"
             return f"Navigate to {arg}"

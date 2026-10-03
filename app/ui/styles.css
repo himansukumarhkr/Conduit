@@ -1,6 +1,4 @@
-/* Conduit - Desktop Dark Theme
-   Matches docs/desktop_ui_mockup.jpg with pixel-precision
-*/
+
 
 :root {
   --bg-app: #080c14;
@@ -63,7 +61,7 @@ body {
   display: flex;
 }
 
-/* Custom Scrollbars */
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -79,14 +77,14 @@ body {
   background: #384e78;
 }
 
-/* App Layout Grid */
+
 #app-container {
   display: flex;
   width: 100%;
   height: 100%;
 }
 
-/* Left Sidebar */
+
 #sidebar {
   width: 72px;
   background-color: var(--bg-sidebar);
@@ -156,7 +154,7 @@ body {
   gap: 12px;
 }
 
-/* Main Workspace */
+
 #main-view {
   flex: 1;
   display: flex;
@@ -166,7 +164,7 @@ body {
   position: relative;
 }
 
-/* Top Control Bar */
+
 #top-bar {
   height: 64px;
   border-bottom: 1px solid var(--border-subtle);
@@ -218,7 +216,7 @@ body {
   gap: 12px;
 }
 
-/* Primary Record & Run Buttons */
+
 .btn-primary {
   background: linear-gradient(135deg, #0284c7, #2563eb);
   color: white;
@@ -300,14 +298,14 @@ body {
   filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.4));
 }
 
-/* Content Body */
+
 #content-body {
   flex: 1;
   display: flex;
   overflow: hidden;
 }
 
-/* Center Table Section */
+
 #table-container {
   flex: 1;
   overflow-y: auto;
@@ -350,7 +348,7 @@ body {
   vertical-align: middle;
 }
 
-/* Checkboxes */
+
 .custom-checkbox {
   width: 16px;
   height: 16px;
@@ -361,7 +359,7 @@ body {
   accent-color: #2563eb;
 }
 
-/* Badges & Pills */
+
 .tag-badge {
   display: inline-block;
   padding: 3px 8px;
@@ -427,7 +425,7 @@ body {
   color: #38bdf8;
 }
 
-/* Right Panel: Test Inspector */
+
 #inspector-panel {
   width: 380px;
   border-left: 1px solid var(--border-subtle);
@@ -459,7 +457,7 @@ body {
   gap: 16px;
 }
 
-/* Accordion Step List */
+
 .accordion-box {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -500,7 +498,7 @@ body {
   background: rgba(56, 189, 248, 0.08);
 }
 
-/* Switch Toggle (Show Code) */
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -556,7 +554,7 @@ input:checked + .slider:before {
   transform: translateX(18px);
 }
 
-/* Code Viewer Area */
+
 #code-viewer-container {
   display: none;
   background-color: var(--code-bg);
@@ -588,7 +586,7 @@ input:checked + .slider:before {
   user-select: text;
 }
 
-/* Terminal Log Panel */
+
 .terminal-box {
   background: #090e18;
   border: 1px solid var(--border-subtle);
@@ -622,7 +620,7 @@ input:checked + .slider:before {
 .log-error { color: #f87171; }
 .log-success { color: #34d399; }
 
-/* Bottom Execution Progress Bar */
+
 #execution-footer {
   height: 44px;
   background: var(--bg-panel);
@@ -666,7 +664,7 @@ input:checked + .slider:before {
   box-shadow: 0 0 8px rgba(6, 182, 212, 0.6);
 }
 
-/* Modal Popup */
+
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; width: 100vw; height: 100vh;

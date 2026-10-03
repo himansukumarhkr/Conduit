@@ -1,7 +1,3 @@
-/* Conduit - Desktop Application State & UI Controller
-   Handles test catalog rendering, Dual-View inspector, and real-time execution streaming.
-*/
-
 let appState = {
   currentEnv: "QA",
   selectedBrowser: "msedge",
@@ -12,9 +8,7 @@ let appState = {
   isExecuting: false
 };
 
-// Initialization
 document.addEventListener("DOMContentLoaded", () => {
-  // Check if pywebview API is available
   if (window.pywebview && window.pywebview.api) {
     loadScenariosFromBackend();
   } else {
@@ -23,7 +17,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Initial render with fallback if running standalone
   setTimeout(() => {
     if (appState.scenarios.length === 0) {
       loadInitialSeedData();
@@ -31,7 +24,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }, 100);
 });
 
-// Bridge to Python Backend
 async function loadScenariosFromBackend() {
   try {
     const list = await window.pywebview.api.get_scenarios();
@@ -45,7 +37,6 @@ async function loadScenariosFromBackend() {
   }
 }
 
-// Fallback seed data matching desktop_ui_mockup.jpg
 function loadInitialSeedData() {
   appState.scenarios = [
     {
@@ -187,7 +178,6 @@ function loadInitialSeedData() {
   selectScenario("sc_001");
 }
 
-// Render Test Catalog Table
 function renderTable() {
   const tbody = document.getElementById("test-table-body");
   tbody.innerHTML = "";
@@ -201,7 +191,6 @@ function renderTable() {
 
     const isChecked = appState.selectedCheckboxIds.has(sc.id);
 
-    // Tags HTML
     const tagsHtml = (sc.tags || []).map(t => {
       const clean = t.replace("@", "");
       let cls = "tag-smoke";
@@ -210,7 +199,6 @@ function renderTable() {
       return `<span class="tag-badge ${cls}">${t}</span>`;
     }).join("");
 
-    // Status HTML
     const isPassed = sc.status === "Passed";
     const statusHtml = isPassed 
       ? `<span class="status-badge status-passed">Passed</span>`
@@ -239,18 +227,15 @@ function renderTable() {
   });
 }
 
-// Select Scenario and Populate Inspector
 function selectScenario(scenarioId) {
   appState.selectedScenarioId = scenarioId;
   const sc = appState.scenarios.find(s => s.id === scenarioId);
   if (!sc) return;
 
-  // Update table row styling
   document.querySelectorAll(".test-table tbody tr").forEach(tr => tr.classList.remove("selected"));
   const row = document.getElementById(`row-${scenarioId}`);
   if (row) row.classList.add("selected");
 
-  // Populate Flow Steps (Functional View)
   document.getElementById("steps-header-title").textContent = `Flow Steps: ${sc.name}`;
   const stepsContainer = document.getElementById("steps-container");
   stepsContainer.innerHTML = "";
@@ -262,20 +247,17 @@ function selectScenario(scenarioId) {
     stepsContainer.appendChild(card);
   });
 
-  // Populate Code Viewer (Automation Engineer View)
   const codeBox = document.getElementById("code-editor-content");
   document.getElementById("code-filename").textContent = sc.file_name || "test_spec.py";
-  codeBox.textContent = sc.code || "# No code synthesized yet.";
+  codeBox.textContent = sc.code || "";
 }
 
-// Toggle Show Code Switch
 function toggleCodeView() {
   const isChecked = document.getElementById("toggle-code-switch").checked;
   const codeContainer = document.getElementById("code-viewer-container");
   codeContainer.style.display = isChecked ? "block" : "none";
 }
 
-// Toggle Steps Accordion
 function toggleStepsAccordion() {
   const container = document.getElementById("steps-container");
   const chevron = document.getElementById("steps-chevron");
@@ -288,7 +270,6 @@ function toggleStepsAccordion() {
   }
 }
 
-// Environment Selector
 function setEnvironment(env) {
   appState.currentEnv = env;
   document.querySelectorAll(".env-pill").forEach(p => p.classList.remove("active"));
@@ -297,7 +278,6 @@ function setEnvironment(env) {
   appendLog("INFO", `Switched environment context to [${env}]`);
 }
 
-// Browser Toggle
 function selectBrowser(browser) {
   appState.selectedBrowser = browser;
   document.querySelectorAll(".browser-icon").forEach(b => b.classList.remove("active"));
@@ -306,7 +286,6 @@ function selectBrowser(browser) {
   appendLog("INFO", `Selected target browser: [${browser === 'msedge' ? 'Microsoft Edge' : 'Google Chrome'}]`);
 }
 
-// Headless Toggle
 function toggleHeadless() {
   appState.headless = !appState.headless;
   const label = document.getElementById("headless-label");
@@ -314,7 +293,6 @@ function toggleHeadless() {
   appendLog("INFO", `Headless mode set to: ${appState.headless ? "ON" : "OFF"}`);
 }
 
-// Checkbox Selection
 function toggleSelectTest(scenarioId, isChecked) {
   if (isChecked) {
     appState.selectedCheckboxIds.add(scenarioId);
@@ -335,7 +313,6 @@ function toggleSelectAll() {
   renderTable();
 }
 
-// Terminal Logging Stream
 function appendLog(level, message) {
   const feed = document.getElementById("terminal-logs-feed");
   const entry = document.createElement("div");
@@ -353,13 +330,11 @@ function clearLogs() {
   document.getElementById("terminal-logs-feed").innerHTML = "";
 }
 
-// Called by Python backend to push streaming logs
 window.conduit_receive_log = function(level, message) {
   appendLog(level, message);
 };
 window.testflow_receive_log = window.conduit_receive_log;
 
-// Called by Python backend to push progress updates
 window.conduit_receive_progress = function(data) {
   const pbar = document.getElementById("exec-progress-bar");
   const ptext = document.getElementById("exec-status-text");
@@ -372,7 +347,6 @@ window.conduit_receive_progress = function(data) {
 };
 window.testflow_receive_progress = window.conduit_receive_progress;
 
-// Run Tests
 async function runSelectedTests() {
   const selectedIds = Array.from(appState.selectedCheckboxIds);
   if (selectedIds.length === 0) {
@@ -391,7 +365,6 @@ async function runSelectedTests() {
       appendLog("ERROR", `Execution launch failed: ${err}`);
     }
   } else {
-    // Standalone simulation
     simulateExecution(selectedIds);
   }
 }
@@ -425,7 +398,6 @@ function simulateExecution(scenarioIds) {
   }, 600);
 }
 
-// Record Modal Handlers
 function openRecordModal() {
   document.getElementById("record-modal").style.display = "flex";
 }
@@ -455,7 +427,6 @@ async function launchRecording() {
   }
 }
 
-// Copy Code
 function copyGeneratedCode() {
   const code = document.getElementById("code-editor-content").textContent;
   navigator.clipboard.writeText(code);

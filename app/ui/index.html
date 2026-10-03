@@ -9,7 +9,7 @@
 <body>
   <div id="app-container">
     
-    <!-- Left Navigation Sidebar -->
+    
     <nav id="sidebar">
       <div class="logo-badge">C</div>
       
@@ -57,10 +57,10 @@
       </div>
     </nav>
 
-    <!-- Main Workspace Area -->
+    
     <div id="main-view">
       
-      <!-- Top Control Bar -->
+      
       <header id="top-bar">
         <div class="header-left">
           <h1 class="header-title">Test Catalog</h1>
@@ -85,7 +85,7 @@
           </button>
 
           <div class="browser-toggles">
-            <!-- Chrome SVG Icon -->
+            
             <svg class="browser-icon" id="browser-chrome" onclick="selectBrowser('chrome')" title="Google Chrome" viewBox="0 0 48 48">
               <path fill="#4CAF50" d="M24,4C13,4,4,13,4,24c0,2.1,0.3,4.1,0.9,6l10.9-18.9C17.6,8.7,20.6,7.4,24,7.4V4z"/>
               <path fill="#FFC107" d="M43.1,18c-2-5.9-6.3-10.4-11.8-12.6L20.4,24.3l8.6,14.9c4.2-2.4,7.4-6.3,8.7-11.1L43.1,18z"/>
@@ -94,13 +94,13 @@
               <circle fill="#1976D2" cx="24" cy="24" r="8"/>
             </svg>
             
-            <!-- Edge SVG Icon -->
+            
             <svg class="browser-icon active" id="browser-msedge" onclick="selectBrowser('msedge')" title="Microsoft Edge" viewBox="0 0 48 48">
               <path fill="#0C8484" d="M43.6 30.5c-1.3 5.4-4.9 9.8-9.8 12.2-4.9 2.4-10.8 2.5-16.1.4-5.3-2.1-9.4-6.6-11.1-12.1-1.7-5.5-.7-11.5 2.7-16.1.4-.5.8-1 1.3-1.4 0 0-2.3 8.3 3.9 11.7 5.4 3 12.1 1.7 16.3-3.2 2.8-3.3 3.7-7.7 2.4-11.9-1.2-4.2-4.4-7.4-8.5-8.8-3.9-1.3-8.2-.8-11.8 1.4-3.6 2.2-6.1 5.8-6.9 9.9-.4 2.1-.3 4.2.1 6.2C6 8.8 14.5 4 24 4c11 0 20 9 20 20 0 2.2-.4 4.4-1.2 6.5h.8z"/>
               <path fill="#29B6F6" d="M42.8 24c0-10.4-8.5-18.8-18.8-18.8-4.2 0-8.2 1.4-11.4 3.9C19 8.2 24.3 12 26.2 18.2c1.9 6.2-.5 12.8-5.8 16.2-4.6 3-10.6 2.7-14.8-.8 3.5 6.3 10.3 10.4 18.2 10.4 11 0 19-9 19-20z"/>
             </svg>
 
-            <!-- Headless Mode Toggle -->
+            
             <div id="headless-toggle" onclick="toggleHeadless()" title="Toggle Headless / Headed mode" style="cursor:pointer;margin-left:6px;font-size:11px;color:#94a3b8;border:1px solid #334155;padding:2px 6px;border-radius:4px;">
               <span id="headless-label">Headless: ON</span>
             </div>
@@ -108,10 +108,10 @@
         </div>
       </header>
 
-      <!-- Center Body (Test Table + Right Inspector Panel) -->
+      
       <div id="content-body">
         
-        <!-- Center Table -->
+        
         <main id="table-container">
           <table class="test-table">
             <thead>
@@ -126,12 +126,12 @@
               </tr>
             </thead>
             <tbody id="test-table-body">
-              <!-- Dynamically populated rows -->
+              
             </tbody>
           </table>
         </main>
 
-        <!-- Right Panel: Test Inspector -->
+        
         <aside id="inspector-panel">
           <div class="inspector-header">
             <span class="inspector-title">Test Inspector</span>
@@ -140,18 +140,18 @@
 
           <div class="inspector-body">
             
-            <!-- Flow Steps (Functional View) -->
+            
             <div class="accordion-box">
               <div class="accordion-title" onclick="toggleStepsAccordion()">
                 <span id="steps-header-title">Flow Steps: User Login Flow</span>
                 <span id="steps-chevron">▲</span>
               </div>
               <div class="step-list" id="steps-container">
-                <!-- Dynamically populated step cards -->
+                
               </div>
             </div>
 
-            <!-- Show Code Toggle Switch -->
+            
             <div class="toggle-row">
               <span class="toggle-label">Show Code</span>
               <label class="switch">
@@ -160,18 +160,18 @@
               </label>
             </div>
 
-            <!-- Code Viewer (Automation Engineer View) -->
+            
             <div id="code-viewer-container">
               <div class="code-viewer-header">
                 <span id="code-filename">login_page.py</span>
                 <button onclick="copyGeneratedCode()" style="background:transparent;border:1px solid #334155;color:#94a3b8;font-size:10px;padding:2px 8px;border-radius:4px;cursor:pointer;">Copy</button>
               </div>
               <div class="code-content" id="code-editor-content">
-                <!-- Synthesized Python code -->
+                
               </div>
             </div>
 
-            <!-- Terminal Logs Panel -->
+            
             <div class="terminal-box">
               <div class="terminal-title">
                 <span>Terminal Logs</span>
@@ -187,7 +187,7 @@
 
       </div>
 
-      <!-- Bottom Execution Bar -->
+      
       <footer id="execution-footer">
         <div class="exec-meta">
           <span class="exec-title">Execution Status</span>
@@ -202,7 +202,7 @@
 
   </div>
 
-  <!-- Modal: Record New Flow -->
+  
   <div class="modal-overlay" id="record-modal">
     <div class="modal-card">
       <div class="modal-header">

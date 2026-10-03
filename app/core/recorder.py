@@ -1,8 +1,3 @@
-"""
-Conduit - Smart Browser Recorder
-Wraps Playwright and intercepts browser interactions via CDP and injected scripts.
-Provides real-time selector ranking and an on-screen Assertion Injection overlay.
-"""
 import threading
 import time
 from typing import List, Dict, Any, Callable, Optional
@@ -15,7 +10,6 @@ RECORDER_INJECTED_SCRIPT = """
     if (window.__CONDUIT_RECORDING_INITIALIZED__) return;
     window.__CONDUIT_RECORDING_INITIALIZED__ = true;
 
-    // Build Floating Assertion Bar
     const overlay = document.createElement('div');
     overlay.id = '__conduit_overlay__';
     overlay.innerHTML = `
@@ -72,13 +66,11 @@ RECORDER_INJECTED_SCRIPT = """
         return path.join(' > ');
     }
 
-    // Intercept clicks
     document.addEventListener('click', (e) => {
         if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
 
         const meta = getElementMeta(e.target);
 
-        // Check if Alt is held: Trigger Assertion Modal
         if (e.altKey) {
             e.preventDefault();
             e.stopPropagation();
@@ -86,7 +78,6 @@ RECORDER_INJECTED_SCRIPT = """
             return;
         }
 
-        // Standard user click
         (window.__conduit_record__ || window.__testflow_record__)({
             action: 'click',
             meta: meta,
@@ -95,7 +86,6 @@ RECORDER_INJECTED_SCRIPT = """
         });
     }, true);
 
-    // Intercept input changes
     document.addEventListener('change', (e) => {
         if (e.target.closest('#__conduit_overlay__')) return;
         const meta = getElementMeta(e.target);
@@ -108,7 +98,6 @@ RECORDER_INJECTED_SCRIPT = """
         });
     }, true);
 
-    // Assertion menu popup
     function showAssertionMenu(x, y, meta, el) {
         const existing = document.getElementById('__conduit_context_menu__');
         if (existing) existing.remove();
@@ -171,9 +160,6 @@ RECORDER_INJECTED_SCRIPT = """
 
 
 class BrowserRecorder:
-    """
-    Manages Playwright recording sessions with pre-installed Chrome or Edge.
-    """
 
     def __init__(self, on_action_recorded: Optional[Callable[[Dict[str, Any]], None]] = None):
         self.on_action_recorded = on_action_recorded
@@ -191,9 +177,6 @@ class BrowserRecorder:
         return self._is_recording
 
     def start_recording(self, initial_url: str = "https://example.com", browser_channel: str = "msedge"):
-        """
-        Starts the browser recorder session in a dedicated background thread.
-        """
         if self._is_recording:
             return
 
@@ -203,28 +186,23 @@ class BrowserRecorder:
         def _run():
             try:
                 self._playwright = sync_playwright().start()
-                # Launch local Edge or Chrome
                 launch_kwargs = {"headless": False}
                 if browser_channel in ("msedge", "chrome"):
                     launch_kwargs["channel"] = browser_channel
 
                 try:
                     self._browser = self._playwright.chromium.launch(**launch_kwargs)
-                except Exception as ex:
-                    # Fallback to standard chromium if channel fails
+                except Exception:
                     self._browser = self._playwright.chromium.launch(headless=False)
 
                 self._context = self._browser.new_context(viewport={"width": 1280, "height": 760})
 
-                # Expose Python binding
                 self._context.expose_binding("__conduit_record__", self._handle_raw_event)
                 self._context.expose_binding("__testflow_record__", self._handle_raw_event)
-                # Inject script on every frame navigation
                 self._context.add_init_script(RECORDER_INJECTED_SCRIPT)
 
                 self._page = self._context.new_page()
 
-                # Record navigation
                 nav_action = {
                     "action": "navigate",
                     "url": initial_url,
@@ -237,7 +215,6 @@ class BrowserRecorder:
 
                 self._page.goto(initial_url)
 
-                # Keep browser session alive until stopped
                 while self._is_recording and self._context and self._context.pages:
                     time.sleep(0.3)
 
@@ -250,14 +227,12 @@ class BrowserRecorder:
         self._thread.start()
 
     def _handle_raw_event(self, source, event_data: Dict[str, Any]):
-        """Callback executed whenever browser sends an interaction."""
         with self._lock:
             act_type = event_data.get("action")
             meta = event_data.get("meta", {})
             val = event_data.get("value", "")
             url = event_data.get("url", "")
 
-            # Run Selector Ranking Engine
             selector_info = SelectorEngine.rank_selector(meta)
             human_desc = SelectorEngine.generate_human_step(act_type, selector_info, val)
 
@@ -279,7 +254,6 @@ class BrowserRecorder:
             self.on_action_recorded(step_data)
 
     def stop_recording(self) -> List[Dict[str, Any]]:
-        """Stops the recording session and cleans up resources."""
         self._is_recording = False
         try:
             if self._context:

@@ -1,7 +1,3 @@
-"""
-Conduit - Pytest Test Runner & Live Log Streamer
-Executes tests via Pytest, streaming logs and real-time execution progress back to the UI.
-"""
 import subprocess
 import sys
 import threading
@@ -11,10 +7,6 @@ from typing import List, Dict, Any, Callable, Optional
 
 
 class TestRunner:
-    """
-    Spawns pytest in a subprocess and monitors stdout/stderr in real time,
-    streaming execution logs and test outcome events.
-    """
 
     def __init__(self, workspace_dir: str):
         self.workspace_dir = workspace_dir
@@ -31,9 +23,6 @@ class TestRunner:
         on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
         on_finished: Optional[Callable[[Dict[str, Any]], None]] = None
     ):
-        """
-        Executes pytest asynchronously, streaming logs and progress.
-        """
         if self.is_running:
             if on_log:
                 on_log("ERROR", "A test execution is already in progress.")
@@ -73,7 +62,6 @@ class TestRunner:
                         "status_text": f"Running ({idx}/{total_tests}): {scenario_name}"
                     })
 
-                # Prepare pytest command
                 cmd = [
                     sys.executable,
                     "-m", "pytest",
@@ -84,7 +72,6 @@ class TestRunner:
                     f"--browser-channel={browser}" if browser in ("msedge", "chrome") else "",
                     "--headed" if not headless else "--headless"
                 ]
-                # Filter empty arguments
                 cmd = [arg for arg in cmd if arg]
 
                 env_vars = os.environ.copy()
@@ -103,7 +90,6 @@ class TestRunner:
                         bufsize=1
                     )
 
-                    # Stream lines in real-time
                     if self._current_process.stdout:
                         for line in iter(self._current_process.stdout.readline, ""):
                             cleaned = line.rstrip()
@@ -162,7 +148,6 @@ class TestRunner:
         t.start()
 
     def stop_execution(self):
-        """Terminates active test execution."""
         if self._current_process and self.is_running:
             self._current_process.terminate()
             self.is_running = False

@@ -1,6 +1,3 @@
-"""
-Integration test for DesktopAPI and Pytest Runner execution.
-"""
 import os
 import tempfile
 import time
@@ -27,7 +24,6 @@ def test_desktop_api_scenarios_and_execution():
         def on_finished(result):
             finished_events.append(result)
 
-        # Wire callbacks to api runner directly for testing
         test_file = os.path.join(api.catalog.tests_dir, scenarios[0]["file_name"])
         assert os.path.exists(test_file)
 
@@ -41,7 +37,6 @@ def test_desktop_api_scenarios_and_execution():
             on_finished=on_finished
         )
 
-        # Wait up to 15 seconds for headless execution
         for _ in range(30):
             if finished_events:
                 break
