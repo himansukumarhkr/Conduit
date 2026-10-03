@@ -1,5 +1,5 @@
 """
-TestFlow Studio - AST Normalizer & Page Object Model (POM) Synthesizer
+Conduit - AST Normalizer & Page Object Model (POM) Synthesizer
 Implements Pillar 2: Translates raw recorded browser interactions into production-grade POM classes
 and clean Pytest specs, with reverse-parsing capability for existing Pytest files.
 """

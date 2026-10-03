@@ -1,5 +1,5 @@
 """
-TestFlow Studio - Smart Browser Recorder
+Conduit - Smart Browser Recorder
 Wraps Playwright and intercepts browser interactions via CDP and injected scripts.
 Provides real-time selector ranking and an on-screen Assertion Injection overlay.
 """
@@ -12,17 +12,17 @@ from app.core.selector_engine import SelectorEngine
 
 RECORDER_INJECTED_SCRIPT = """
 (() => {
-    if (window.__TESTFLOW_RECORDING_INITIALIZED__) return;
-    window.__TESTFLOW_RECORDING_INITIALIZED__ = true;
+    if (window.__CONDUIT_RECORDING_INITIALIZED__) return;
+    window.__CONDUIT_RECORDING_INITIALIZED__ = true;
 
     // Build Floating Assertion Bar
     const overlay = document.createElement('div');
-    overlay.id = '__testflow_overlay__';
+    overlay.id = '__conduit_overlay__';
     overlay.innerHTML = `
         <div style="position:fixed;bottom:20px;right:20px;z-index:2147483647;background:#0d1527;border:1px solid #2a3a5e;border-radius:10px;padding:8px 14px;box-shadow:0 8px 24px rgba(0,0,0,0.5);font-family:sans-serif;display:flex;align-items:center;gap:10px;color:#fff;font-size:12px;">
             <div style="display:flex;align-items:center;gap:6px;">
                 <span style="display:inline-block;width:8px;height:8px;background:#ef4444;border-radius:50%;animation:pulse 1.5s infinite;"></span>
-                <strong style="color:#38bdf8;">TestFlow Studio Recording</strong>
+                <strong style="color:#38bdf8;">Conduit Recording</strong>
             </div>
             <div style="border-left:1px solid #334155;height:18px;"></div>
             <span style="color:#94a3b8;">Alt+Click any element to add Assertion</span>
@@ -74,7 +74,7 @@ RECORDER_INJECTED_SCRIPT = """
 
     // Intercept clicks
     document.addEventListener('click', (e) => {
-        if (e.target.closest('#__testflow_overlay__') || e.target.closest('#__testflow_context_menu__')) return;
+        if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
 
         const meta = getElementMeta(e.target);
 
@@ -87,7 +87,7 @@ RECORDER_INJECTED_SCRIPT = """
         }
 
         // Standard user click
-        window.__testflow_record__({
+        (window.__conduit_record__ || window.__testflow_record__)({
             action: 'click',
             meta: meta,
             url: window.location.href,
@@ -97,9 +97,9 @@ RECORDER_INJECTED_SCRIPT = """
 
     // Intercept input changes
     document.addEventListener('change', (e) => {
-        if (e.target.closest('#__testflow_overlay__')) return;
+        if (e.target.closest('#__conduit_overlay__')) return;
         const meta = getElementMeta(e.target);
-        window.__testflow_record__({
+        (window.__conduit_record__ || window.__testflow_record__)({
             action: 'fill',
             meta: meta,
             value: e.target.value || '',
@@ -110,11 +110,11 @@ RECORDER_INJECTED_SCRIPT = """
 
     // Assertion menu popup
     function showAssertionMenu(x, y, meta, el) {
-        const existing = document.getElementById('__testflow_context_menu__');
+        const existing = document.getElementById('__conduit_context_menu__');
         if (existing) existing.remove();
 
         const menu = document.createElement('div');
-        menu.id = '__testflow_context_menu__';
+        menu.id = '__conduit_context_menu__';
         menu.style.cssText = `position:fixed;top:${y}px;left:${x}px;z-index:2147483647;background:#1e293b;border:1px solid #38bdf8;border-radius:8px;padding:8px;box-shadow:0 10px 25px rgba(0,0,0,0.6);font-family:sans-serif;color:#fff;font-size:12px;min-width:180px;`;
         
         menu.innerHTML = `
@@ -127,7 +127,7 @@ RECORDER_INJECTED_SCRIPT = """
         document.body.appendChild(menu);
 
         document.getElementById('__tf_assert_visible').onclick = () => {
-            window.__testflow_record__({
+            (window.__conduit_record__ || window.__testflow_record__)({
                 action: 'assert_visible',
                 meta: meta,
                 url: window.location.href,
@@ -139,7 +139,7 @@ RECORDER_INJECTED_SCRIPT = """
         document.getElementById('__tf_assert_text').onclick = () => {
             const textVal = prompt('Expected text content:', meta.text || '');
             if (textVal !== null) {
-                window.__testflow_record__({
+                (window.__conduit_record__ || window.__testflow_record__)({
                     action: 'assert_text',
                     meta: meta,
                     value: textVal,
@@ -153,7 +153,7 @@ RECORDER_INJECTED_SCRIPT = """
         document.getElementById('__tf_assert_val').onclick = () => {
             const val = prompt('Expected element value:', el.value || '');
             if (val !== null) {
-                window.__testflow_record__({
+                (window.__conduit_record__ || window.__testflow_record__)({
                     action: 'assert_value',
                     meta: meta,
                     value: val,
@@ -217,6 +217,7 @@ class BrowserRecorder:
                 self._context = self._browser.new_context(viewport={"width": 1280, "height": 760})
 
                 # Expose Python binding
+                self._context.expose_binding("__conduit_record__", self._handle_raw_event)
                 self._context.expose_binding("__testflow_record__", self._handle_raw_event)
                 # Inject script on every frame navigation
                 self._context.add_init_script(RECORDER_INJECTED_SCRIPT)
@@ -241,7 +242,7 @@ class BrowserRecorder:
                     time.sleep(0.3)
 
             except Exception as e:
-                print(f"[TestFlow Recorder Error]: {e}")
+                print(f"[Conduit Recorder Error]: {e}")
             finally:
                 self.stop_recording()
 

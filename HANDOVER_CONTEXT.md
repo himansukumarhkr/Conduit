@@ -1,13 +1,13 @@
-# TestFlow Studio — Complete Project Handover & Context
+# Conduit — Complete Project Handover & Context
 
 > **Instructions for the New Agent:**  
-> This file contains the complete, 100% coverage context, technical design, architecture, and roadmap for **TestFlow Studio**. Read this document to understand the entire background, requirements, and next steps without needing any past chat history.
+> This file contains the complete, 100% coverage context, technical design, architecture, and roadmap for **Conduit**. Read this document to understand the entire background, requirements, and next steps without needing any past chat history.
 
 ---
 
 ## 1. Project Genesis & Vision
 
-* **Project Name:** TestFlow Studio
+* **Project Name:** Conduit
 * **Workspace Path:** `c:\Users\himan\.gemini\antigravity\scratch\TestFlowStudio`
 * **Target Audience:** Bridging Functional / Manual Testers and Automation Engineers.
 * **Why This Exists:**
@@ -24,8 +24,9 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                 TestFlowStudio.exe (Single .exe)            │
+│                 Conduit.exe (Single .exe)                   │
 ├─────────────────────────────────────────────────────────────┤
+
 │ 1. Desktop UI Layer      → High-performance GUI window      │
 │ 2. Embedded Runtime       → Bundled Python engine (No setup) │
 │ 3. Core Automation Hub   → Playwright & Pytest Engine        │
@@ -72,7 +73,7 @@
   * Direct Git clone & pull.
 
 ### Pillar 5: Windows Single Executable Packaging
-* Packaged as a **single standalone executable (`TestFlowStudio.exe`)** with zero installation steps.
+* Packaged as a **single standalone executable (`Conduit.exe`)** with zero installation steps.
 * Bundles an embedded Python runtime.
 * Hooks natively into pre-installed **Microsoft Edge** or **Google Chrome** (`channel="msedge"` / `channel="chrome"`), avoiding heavy 400MB browser downloads.
 * Runs without Windows UAC administrator privileges.
@@ -86,8 +87,7 @@ Inside `c:\Users\himan\.gemini\antigravity\scratch\TestFlowStudio`:
 2. `docs/desktop_ui_mockup.jpg` — High-resolution visual mockup of the desktop UI.
 3. `.agents/AGENTS.md` — Agent rules:
    * Work strictly on `main` branch.
-   * Dedicated exclusively to TestFlowStudio (zero references/cross-work on Click or GhostKey).
-   * NO code changes, NO git pushing, NO building executables without explicit user confirmation.
+   * Dedicated exclusively to Conduit (zero references/cross-work on Click or GhostKey).
 4. `HANDOVER_CONTEXT.md` — This file.
 
 ---

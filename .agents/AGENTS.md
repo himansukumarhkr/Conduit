@@ -1,7 +1,7 @@
 ## Workspace Scope
 
-- This project is **TestFlowStudio** (Standalone UI Test Automation Desktop Framework) located at `c:\Users\himan\.gemini\antigravity\scratch\TestFlowStudio`.
-- All development, design, and planning are strictly dedicated to TestFlowStudio.
+- This project is **Conduit** (Standalone UI Test Automation Desktop Framework) located at `c:\Users\himan\.gemini\antigravity\scratch\TestFlowStudio`.
+- All development, design, and planning are strictly dedicated to Conduit.
 - Completely isolated from external apps (Click, Ghyn/GhostKey).
 
 ## Workflow Rules

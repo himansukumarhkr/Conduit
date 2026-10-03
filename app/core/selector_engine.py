@@ -1,5 +1,5 @@
 """
-TestFlow Studio - Selector Ranking & Normalization Engine
+Conduit - Selector Ranking & Normalization Engine
 Implements Pillar 1: Durability-based selector ranking and clean locator generation.
 """
 from typing import Dict, Any, Tuple, Optional

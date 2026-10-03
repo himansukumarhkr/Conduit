@@ -1,4 +1,4 @@
-/* TestFlow Studio - Desktop Application State & UI Controller
+/* Conduit - Desktop Application State & UI Controller
    Handles test catalog rendering, Dual-View inspector, and real-time execution streaming.
 */
 
@@ -354,12 +354,13 @@ function clearLogs() {
 }
 
 // Called by Python backend to push streaming logs
-window.testflow_receive_log = function(level, message) {
+window.conduit_receive_log = function(level, message) {
   appendLog(level, message);
 };
+window.testflow_receive_log = window.conduit_receive_log;
 
 // Called by Python backend to push progress updates
-window.testflow_receive_progress = function(data) {
+window.conduit_receive_progress = function(data) {
   const pbar = document.getElementById("exec-progress-bar");
   const ptext = document.getElementById("exec-status-text");
   if (pbar && data.percentage !== undefined) {
@@ -369,6 +370,7 @@ window.testflow_receive_progress = function(data) {
     ptext.textContent = data.status_text;
   }
 };
+window.testflow_receive_progress = window.conduit_receive_progress;
 
 // Run Tests
 async function runSelectedTests() {

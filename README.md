@@ -1,4 +1,4 @@
-# TestFlow Studio
+# Conduit
 
 > **A Standalone Desktop Low-Code / Pro-Code UI Test Automation Framework**  
 > Bridging the gap between Functional Testers and Automation Engineers.
@@ -9,7 +9,7 @@
 
 In modern QA teams, functional testers have deep business domain knowledge but lack automation coding skills, while automation engineers spend 70% of their time writing boilerplate locators and translating manual test cases into code.
 
-**TestFlow Studio** solves this with a **Dual-View, Code-First Low-Code Desktop Application**:
+**Conduit** solves this with a **Dual-View, Code-First Low-Code Desktop Application**:
 1. **Functional Testers** can record end-to-end user journeys via an instrumented browser, tag suites (`@smoke`, `@regression`), parameterize data, and run tests via a simple desktop UI.
 2. **The AST Normalization Engine** transforms raw recorded browser actions into clean, maintainable **Page Object Model (POM)** Python/Playwright scripts.
 3. **Automation Engineers** can import/export the exact same codebase into standard Git repositories, edit in VS Code / PyCharm, add complex fixtures, and run in CI/CD without proprietary lock-in.
@@ -18,7 +18,7 @@ In modern QA teams, functional testers have deep business domain knowledge but l
 
 ## 🖥️ UI Architecture (Desktop App)
 
-![TestFlow Studio Mockup](docs/desktop_ui_mockup.jpg)
+![Conduit Mockup](docs/desktop_ui_mockup.jpg)
 
 ### Core UI Modules
 - **Top Control Bar:** 1-click `[Record New Flow]`, `[Run Selected]`, environment switcher (`QA` / `Staging` / `Prod`), and browser toggles (Chrome, Edge, Headless mode).
@@ -47,7 +47,7 @@ In modern QA teams, functional testers have deep business domain knowledge but l
 
 ## 📦 Packaging & Distribution
 
-- Delivered as a **Single Standalone Executable (`TestFlowStudio.exe`)** with zero installation prerequisites.
+- Delivered as a **Single Standalone Executable (`Conduit.exe`)** with zero installation prerequisites.
 - Bundles an embedded Python runtime and taps natively into pre-installed Microsoft Edge / Google Chrome on Windows.
 
 ---

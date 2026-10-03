@@ -1,5 +1,5 @@
 """
-TestFlow Studio - Desktop Application Entrypoint
+Conduit - Desktop Application Entrypoint
 Orchestrates PyWebView Desktop Window, IPC API Bridge, and Automation Hub.
 """
 import os
@@ -139,11 +139,11 @@ class DesktopAPI:
 
     def _log_to_ui(self, level: str, msg: str):
         safe_msg = json.dumps(msg)
-        self._evaluate_js(f"window.testflow_receive_log && window.testflow_receive_log('{level}', {safe_msg});")
+        self._evaluate_js(f"(window.conduit_receive_log || window.testflow_receive_log) && (window.conduit_receive_log || window.testflow_receive_log)('{level}', {safe_msg});")
 
     def _emit_progress_to_ui(self, data: Dict[str, Any]):
         data_json = json.dumps(data)
-        self._evaluate_js(f"window.testflow_receive_progress && window.testflow_receive_progress({data_json});")
+        self._evaluate_js(f"(window.conduit_receive_progress || window.testflow_receive_progress) && (window.conduit_receive_progress || window.testflow_receive_progress)({data_json});")
 
     def _evaluate_js(self, script: str):
         if self.window:
@@ -161,7 +161,7 @@ def main():
     index_html = os.path.join(ui_dir, "index.html")
 
     window = webview.create_window(
-        title="TestFlow Studio",
+        title="Conduit",
         url=index_html,
         js_api=api,
         width=1340,

@@ -142,5 +142,5 @@ def test_catalog_manager():
         scenarios = cm.get_all_scenarios()
         assert len(scenarios) >= 5
         assert scenarios[0]["name"] == "User Login Flow"
-        assert os.path.exists(os.path.join(tmp_dir, "testflow.json"))
+        assert os.path.exists(os.path.join(tmp_dir, "conduit.json"))
         assert os.path.exists(os.path.join(tmp_dir, "tests", "test_user_login_flow.py"))

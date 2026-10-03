@@ -1,5 +1,5 @@
 """
-TestFlow Studio - Pytest Test Runner & Live Log Streamer
+Conduit - Pytest Test Runner & Live Log Streamer
 Executes tests via Pytest, streaming logs and real-time execution progress back to the UI.
 """
 import subprocess
@@ -88,6 +88,7 @@ class TestRunner:
                 cmd = [arg for arg in cmd if arg]
 
                 env_vars = os.environ.copy()
+                env_vars["CONDUIT_ENV"] = env
                 env_vars["TESTFLOW_ENV"] = env
                 env_vars["PYTHONPATH"] = self.workspace_dir
 
