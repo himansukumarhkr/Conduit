@@ -73,6 +73,6 @@ python -m pytest tests/ -v
 
 ## 🗺️ Project Status
 
-- **Phase 1 (Complete):** Core Desktop UI (Edge WebView2), Selector Durability Ranker, AST Normalizer / POM Synthesizer, Pytest Live Execution Runner.
+- **Phase 1 (Complete):** 100% Native Python Desktop UI (PySide6 / Qt6), Selector Durability Ranker, AST Normalizer / POM Synthesizer, Pytest Live Execution Runner.
 - **Workspace:** `c:\Users\himan\.gemini\antigravity\scratch\TestFlowStudio`
 

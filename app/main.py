@@ -1,7 +1,5 @@
 import os
 import sys
-import json
-import webview
 from typing import List, Dict, Any
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -12,10 +10,10 @@ from app.core.catalog_manager import CatalogManager
 from app.core.ast_normalizer import ASTNormalizer
 from app.core.recorder import BrowserRecorder
 from app.core.runner import TestRunner
+from app.ui.main_window import ConduitMainWindow
 
 
 class DesktopAPI:
-
     def __init__(self, workspace_dir: str):
         self.workspace_dir = workspace_dir
         self.catalog = CatalogManager(workspace_dir)
@@ -23,15 +21,11 @@ class DesktopAPI:
         self.runner = TestRunner(workspace_dir)
         self.recorder = None
         self._current_recording_meta = {}
-        self.window = None
-
-    def set_window(self, window):
-        self.window = window
 
     def get_scenarios(self) -> List[Dict[str, Any]]:
         return self.catalog.get_all_scenarios()
 
-    def run_scenarios(self, scenario_ids: List[str], browser: str = "msedge", headless: bool = True, env: str = "QA"):
+    def run_scenarios(self, scenario_ids: List[str], browser: str = "msedge", headless: bool = True, env: str = "QA", on_log=None, on_progress=None, on_finished=None):
         test_files = []
         for s_id in scenario_ids:
             sc = self.catalog.get_scenario(s_id)
@@ -41,34 +35,30 @@ class DesktopAPI:
                     test_files.append(test_path)
 
         if not test_files:
-            self._log_to_ui("ERROR", "No valid test files found on disk for selected scenarios.")
+            if on_log:
+                on_log("ERROR", "No valid test files found on disk for selected scenarios.")
             return {"status": "error", "message": "No test files found"}
 
-        def on_log(level: str, msg: str):
-            self._log_to_ui(level, msg)
-
-        def on_progress(data: Dict[str, Any]):
-            self._emit_progress_to_ui(data)
-
-        def on_finished(result: Dict[str, Any]):
+        def internal_on_finished(result: Dict[str, Any]):
             status = result.get("status", "Passed")
             dur = f"{result.get('duration', 0)}s"
             for s_id in scenario_ids:
                 self.catalog.update_execution_result(s_id, status, dur)
-            self._evaluate_js("loadScenariosFromBackend();")
+            if on_finished:
+                on_finished(result)
 
         self.runner.run_tests_async(
             test_file_paths=test_files,
             browser=browser,
             headless=headless,
             env=env,
-            on_log=on_log,
-            on_progress=on_progress,
-            on_finished=on_finished
+            on_log=on_log or (lambda lvl, msg: None),
+            on_progress=on_progress or (lambda data: None),
+            on_finished=internal_on_finished
         )
         return {"status": "started", "tests_count": len(test_files)}
 
-    def start_recording(self, scenario_name: str, start_url: str, tags: List[str], browser: str = "msedge"):
+    def start_recording(self, scenario_name: str, start_url: str, tags: List[str], browser: str = "msedge", on_action=None):
         self._current_recording_meta = {
             "name": scenario_name,
             "url": start_url,
@@ -76,16 +66,12 @@ class DesktopAPI:
             "browser": browser
         }
 
-        def on_action(step_data: Dict[str, Any]):
-            desc = step_data.get("human_description", "")
-            self._log_to_ui("INFO", f"Recorded step: {desc}")
-
         self.recorder = BrowserRecorder(on_action_recorded=on_action)
         self.recorder.start_recording(initial_url=start_url, browser_channel=browser)
 
         return {
             "status": "recording_started",
-            "message": f"Browser recorder launched for '{scenario_name}' on {browser}. Use Alt+Click in the browser to inject assertions."
+            "message": f"Browser recorder launched for '{scenario_name}' on {browser}."
         }
 
     def stop_recording(self):
@@ -94,8 +80,6 @@ class DesktopAPI:
 
         actions = self.recorder.stop_recording()
         meta = self._current_recording_meta
-
-        self._log_to_ui("INFO", f"Synthesizing Page Object Model and Pytest spec for {len(actions)} action(s)...")
 
         synth_result = self.ast_engine.synthesize_pom_and_test(
             scenario_name=meta.get("name", "Recorded Scenario"),
@@ -117,46 +101,16 @@ class DesktopAPI:
         }
 
         self.catalog.add_or_update_scenario(new_scenario)
-        self._log_to_ui("SUCCESS", f"Synthesized Page Objects and Pytest scenario: {synth_result['file_name']}")
-
-        self._evaluate_js("loadScenariosFromBackend();")
         return {"status": "success", "scenario": new_scenario}
-
-    def _log_to_ui(self, level: str, msg: str):
-        safe_msg = json.dumps(msg)
-        self._evaluate_js(f"(window.conduit_receive_log || window.testflow_receive_log) && (window.conduit_receive_log || window.testflow_receive_log)('{level}', {safe_msg});")
-
-    def _emit_progress_to_ui(self, data: Dict[str, Any]):
-        data_json = json.dumps(data)
-        self._evaluate_js(f"(window.conduit_receive_progress || window.testflow_receive_progress) && (window.conduit_receive_progress || window.testflow_receive_progress)({data_json});")
-
-    def _evaluate_js(self, script: str):
-        if self.window:
-            try:
-                self.window.evaluate_js(script)
-            except Exception:
-                pass
 
 
 def main():
+    from PySide6.QtWidgets import QApplication
     workspace_dir = os.path.join(BASE_DIR, "tests_workspace")
-    api = DesktopAPI(workspace_dir)
-
-    ui_dir = os.path.join(BASE_DIR, "app", "ui")
-    index_html = os.path.join(ui_dir, "index.html")
-
-    window = webview.create_window(
-        title="Conduit",
-        url=index_html,
-        js_api=api,
-        width=1340,
-        height=820,
-        min_size=(1080, 680),
-        background_color="#080c14"
-    )
-    api.set_window(window)
-
-    webview.start(gui="edgechromium", debug=False)
+    app = QApplication(sys.argv)
+    window = ConduitMainWindow(workspace_dir)
+    window.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

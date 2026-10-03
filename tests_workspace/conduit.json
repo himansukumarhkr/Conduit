@@ -1,0 +1,210 @@
+{
+  "version": "1.0",
+  "last_updated": 1791071278.2041306,
+  "scenarios": [
+    {
+      "id": "sc_001",
+      "name": "User Login Flow",
+      "tags": [
+        "@smoke",
+        "@regression"
+      ],
+      "last_execution": "5 min ago",
+      "status": "Passed",
+      "duration": "1min 20s",
+      "file_name": "test_user_login_flow.py",
+      "steps": [
+        {
+          "human_description": "1. Navigate to /login",
+          "code": "page.goto(\"https://demo.playwright.dev/todomvc/#/login\")"
+        },
+        {
+          "human_description": "2. Fill 'email' input",
+          "code": "login_page.fill_email(\"admin@conduit.io\")"
+        },
+        {
+          "human_description": "3. Fill 'password' input",
+          "code": "login_page.fill_password(\"SuperSecret123!\")"
+        },
+        {
+          "human_description": "4. Click 'Submit' button",
+          "code": "login_page.click_submit()"
+        },
+        {
+          "human_description": "5. Assert success message visible",
+          "code": "login_page.assert_success_message_visible()"
+        }
+      ],
+      "code": "import pytest\nfrom playwright.sync_api import Page, expect\nfrom pages.login_page import LoginPage\n\n@pytest.mark.smoke\n@pytest.mark.regression\ndef test_user_login_flow(page: Page):\n    login_page = LoginPage(page)\n    page.goto(\"https://demo.playwright.dev/todomvc/\")\n    login_page.fill_email(\"admin@conduit.io\")\n    login_page.fill_password(\"SuperSecret123!\")\n    login_page.click_submit()\n    login_page.assert_success_message_visible()\n",
+      "pages": [
+        {
+          "class_name": "LoginPage",
+          "file_name": "login_page.py",
+          "code": "from playwright.sync_api import Page, Locator, expect\n\nclass LoginPage:\n    def __init__(self, page: Page):\n        self.page = page\n        self.email_input: Locator = page.locator(\"[data-testid='email-input']\")\n        self.password_input: Locator = page.get_by_label(\"Password\")\n        self.submit_button: Locator = page.get_by_role(\"button\", name=\"Sign In\")\n        self.success_message: Locator = page.locator(\".toast-success\")\n\n    def fill_email(self, email: str):\n        self.email_input.fill(email)\n\n    def fill_password(self, password: str):\n        self.password_input.fill(password)\n\n    def click_submit(self):\n        self.submit_button.click()\n\n    def assert_success_message_visible(self):\n        expect(self.success_message).to_be_visible()\n"
+        }
+      ]
+    },
+    {
+      "id": "sc_002",
+      "name": "Add Item to Cart",
+      "tags": [
+        "@smoke",
+        "@checkout"
+      ],
+      "last_execution": "5 min ago",
+      "status": "Failed",
+      "duration": "45s",
+      "file_name": "test_add_item_to_cart_checkout.py",
+      "steps": [
+        {
+          "human_description": "1. Navigate to /catalog",
+          "code": "page.goto(\"https://demo.playwright.dev/todomvc/\")"
+        },
+        {
+          "human_description": "2. Click 'Add to Cart' button",
+          "code": "catalog_page.click_add_to_cart()"
+        },
+        {
+          "human_description": "3. Assert cart counter equals '1'",
+          "code": "cart_page.assert_counter(\"1\")"
+        }
+      ],
+      "code": "import pytest\nfrom pages.catalog_page import CatalogPage\nfrom pages.cart_page import CartPage\n\n@pytest.mark.smoke\n@pytest.mark.checkout\ndef test_add_item_to_cart_checkout(page):\n    catalog_page = CatalogPage(page)\n    cart_page = CartPage(page)\n    page.goto(\"https://demo.playwright.dev/todomvc/\")\n    catalog_page.click_add_to_cart()\n    cart_page.assert_counter(\"1\")\n",
+      "pages": []
+    },
+    {
+      "id": "sc_003",
+      "name": "Add Item to Cart",
+      "tags": [
+        "@smoke",
+        "@regression"
+      ],
+      "last_execution": "3 min ago",
+      "status": "Passed",
+      "duration": "45s",
+      "file_name": "test_add_item_to_cart_regression.py",
+      "steps": [
+        {
+          "human_description": "1. Navigate to /catalog",
+          "code": "page.goto(\"https://demo.playwright.dev/todomvc/\")"
+        },
+        {
+          "human_description": "2. Select quantity '2'",
+          "code": "catalog_page.select_quantity(\"2\")"
+        },
+        {
+          "human_description": "3. Click 'Add to Cart' button",
+          "code": "catalog_page.click_add_to_cart()"
+        },
+        {
+          "human_description": "4. Assert cart badge visible",
+          "code": "cart_page.assert_badge_visible()"
+        }
+      ],
+      "code": "import pytest\nfrom pages.catalog_page import CatalogPage\nfrom pages.cart_page import CartPage\n\n@pytest.mark.smoke\n@pytest.mark.regression\ndef test_add_item_to_cart_regression(page):\n    catalog_page = CatalogPage(page)\n    cart_page = CartPage(page)\n    page.goto(\"https://demo.playwright.dev/todomvc/\")\n    catalog_page.select_quantity(\"2\")\n    catalog_page.click_add_to_cart()\n    cart_page.assert_badge_visible()\n",
+      "pages": []
+    },
+    {
+      "id": "sc_004",
+      "name": "Assert Item Management",
+      "tags": [
+        "@smoke",
+        "@checkout"
+      ],
+      "last_execution": "2 min ago",
+      "status": "Passed",
+      "duration": "45s",
+      "file_name": "test_assert_item_management.py",
+      "steps": [
+        {
+          "human_description": "1. Navigate to /admin/items",
+          "code": "page.goto(\"https://demo.playwright.dev/todomvc/\")"
+        },
+        {
+          "human_description": "2. Assert items table visible",
+          "code": "admin_page.assert_items_table_visible()"
+        },
+        {
+          "human_description": "3. Click 'Filter by Active'",
+          "code": "admin_page.click_filter_active()"
+        }
+      ],
+      "code": "import pytest\nfrom pages.admin_page import AdminPage\n\n@pytest.mark.smoke\n@pytest.mark.checkout\ndef test_assert_item_management(page):\n    admin_page = AdminPage(page)\n    page.goto(\"https://demo.playwright.dev/todomvc/\")\n    admin_page.assert_items_table_visible()\n    admin_page.click_filter_active()\n",
+      "pages": []
+    },
+    {
+      "id": "sc_005",
+      "name": "Assert success message Flow",
+      "tags": [
+        "@regression"
+      ],
+      "last_execution": "3 min ago",
+      "status": "Passed",
+      "duration": "1min 20s",
+      "file_name": "test_assert_success_message_flow.py",
+      "steps": [
+        {
+          "human_description": "1. Fill 'Feedback' form",
+          "code": "feedback_page.fill_feedback(\"Great platform!\")"
+        },
+        {
+          "human_description": "2. Click 'Submit Feedback'",
+          "code": "feedback_page.click_submit()"
+        },
+        {
+          "human_description": "3. Assert toast message contains 'Success'",
+          "code": "feedback_page.assert_toast(\"Success\")"
+        }
+      ],
+      "code": "import pytest\nfrom pages.feedback_page import FeedbackPage\n\n@pytest.mark.regression\ndef test_assert_success_message_flow(page):\n    feedback_page = FeedbackPage(page)\n    feedback_page.fill_feedback(\"Great platform!\")\n    feedback_page.click_submit()\n    feedback_page.assert_toast(\"Success\")\n",
+      "pages": []
+    },
+    {
+      "id": "sc_006",
+      "name": "Assert Login Flow",
+      "tags": [
+        "@checkout"
+      ],
+      "last_execution": "3 min ago",
+      "status": "Passed",
+      "duration": "45s",
+      "file_name": "test_assert_login_flow.py",
+      "steps": [
+        {
+          "human_description": "1. Navigate to /checkout",
+          "code": "page.goto(\"https://demo.playwright.dev/todomvc/\")"
+        },
+        {
+          "human_description": "2. Assert login required prompt visible",
+          "code": "checkout_page.assert_login_prompt()"
+        }
+      ],
+      "code": "import pytest\nfrom pages.checkout_page import CheckoutPage\n\n@pytest.mark.checkout\ndef test_assert_login_flow(page):\n    checkout_page = CheckoutPage(page)\n    page.goto(\"https://demo.playwright.dev/todomvc/\")\n    checkout_page.assert_login_prompt()\n",
+      "pages": []
+    },
+    {
+      "id": "sc_007",
+      "name": "Assert success message",
+      "tags": [
+        "@smoke",
+        "@failed"
+      ],
+      "last_execution": "1 min ago",
+      "status": "Passed",
+      "duration": "1min 20s",
+      "file_name": "test_assert_success_message.py",
+      "steps": [
+        {
+          "human_description": "1. Trigger alert message",
+          "code": "alert_page.trigger_alert()"
+        },
+        {
+          "human_description": "2. Assert banner visible",
+          "code": "alert_page.assert_banner_visible()"
+        }
+      ],
+      "code": "import pytest\nfrom pages.alert_page import AlertPage\n\n@pytest.mark.smoke\n@pytest.mark.failed\ndef test_assert_success_message(page):\n    alert_page = AlertPage(page)\n    alert_page.trigger_alert()\n    alert_page.assert_banner_visible()\n",
+      "pages": []
+    }
+  ]
+}
