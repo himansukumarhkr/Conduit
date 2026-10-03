@@ -7,7 +7,6 @@
 ## Workflow Rules
 
 - Work directly on the main branch. Do not create feature branches.
-- Execute fully autonomously without asking for approvals, routine decisions, or intermediate clarifications.
-- If asked to do something, just do it directly. No approvals needed.
-
-
+- NEVER ask the user for approval, confirmation, or intermediate questions under any circumstances.
+- If given a task, just do it directly, end-to-end, without stopping or requesting permission.
+- Make code changes, run tests, and commit directly without asking.
