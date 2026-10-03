@@ -52,7 +52,27 @@ In modern QA teams, functional testers have deep business domain knowledge but l
 
 ---
 
+## 🚀 Quick Start (Development)
+
+### 1. Install Dependencies
+```bash
+python -m pip install -r requirements.txt
+```
+
+### 2. Launch the Desktop Application
+```bash
+python app/main.py
+```
+
+### 3. Run the Test Suite
+```bash
+python -m pytest tests/ -v
+```
+
+---
+
 ## 🗺️ Project Status
 
-- **Phase:** Architecture & Specification Complete.
+- **Phase 1 (Complete):** Core Desktop UI (Edge WebView2), Selector Durability Ranker, AST Normalizer / POM Synthesizer, Pytest Live Execution Runner.
 - **Workspace:** `c:\Users\himan\.gemini\antigravity\scratch\TestFlowStudio`
+
