@@ -4,13 +4,18 @@ from urllib.parse import urlparse
 from typing import List, Dict, Any, Tuple
 from jinja2 import Environment, FileSystemLoader
 import os
+import sys
 
 
 class ASTNormalizer:
 
     def __init__(self, template_dir: str = None):
         if not template_dir:
-            template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
+            base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            candidate = os.path.join(base, "templates")
+            if not os.path.exists(candidate):
+                candidate = os.path.join(base, "app", "templates")
+            template_dir = candidate
         self.jinja_env = Environment(
             loader=FileSystemLoader(template_dir),
             trim_blocks=True,
