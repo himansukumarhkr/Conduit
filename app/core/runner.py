@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Callable, Optional
 
 
 class TestRunner:
+    __test__ = False
 
     def __init__(self, workspace_dir: str):
         self.workspace_dir = workspace_dir
@@ -74,14 +75,14 @@ class TestRunner:
                     "--tb=short",
                     "-s",
                     f"--browser-channel={browser}" if browser in ("msedge", "chrome") else "",
-                    "--headed" if not headless else "--headless"
+                    "--headed" if not headless else ""
                 ]
                 cmd = [arg for arg in cmd if arg]
 
                 env_vars = os.environ.copy()
                 env_vars["CONDUIT_ENV"] = env
                 env_vars["TESTFLOW_ENV"] = env
-                env_vars["PYTHONPATH"] = self.workspace_dir
+                env_vars["PYTHONPATH"] = f"{self.workspace_dir}{os.pathsep}{os.getcwd()}"
                 env_vars["CONDUIT_WORKSPACE"] = self.workspace_dir
                 env_vars["CONDUIT_BROWSER"] = browser
                 env_vars["CONDUIT_CAPTURE_EVIDENCE"] = "1" if capture_evidence else "0"

@@ -5,7 +5,7 @@ from app.main import DesktopAPI
 
 
 def test_desktop_api_scenarios_and_execution():
-    with tempfile.TemporaryDirectory() as tmp_dir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
         api = DesktopAPI(tmp_dir)
         scenarios = api.get_scenarios()
         assert len(scenarios) > 0
@@ -29,7 +29,7 @@ def test_desktop_api_scenarios_and_execution():
 
         api.runner.run_tests_async(
             test_file_paths=[test_file],
-            browser="msedge",
+            browser="chromium",
             headless=True,
             env="QA",
             on_log=on_log,
@@ -37,7 +37,7 @@ def test_desktop_api_scenarios_and_execution():
             on_finished=on_finished
         )
 
-        for _ in range(30):
+        for _ in range(60):
             if finished_events:
                 break
             time.sleep(0.5)

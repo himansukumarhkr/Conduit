@@ -207,10 +207,18 @@ class ASTNormalizer:
                 "docstring": "",
                 "body_lines": [f"expect(self.{var_name}).to_have_value(expected_val)"]
             }
+        elif act_type == "press":
+            method_name = f"press_{var_name}"
+            method = {
+                "name": method_name,
+                "params_signature": ", key: str = 'Enter'",
+                "docstring": "",
+                "body_lines": [f"self.{var_name}.press(key)"]
+            }
             step_code = f'{page_var}.{method_name}("{val}")'
             return step_code, method
 
-        return f"# Action: {act_type} on {var_name}", None
+        return "pass", None
 
     @staticmethod
     def _to_snake(name: str) -> str:
@@ -267,7 +275,11 @@ class ASTNormalizer:
             func_name = getattr(call_node.func, "attr", "")
             target = func_name.replace("fill_", "").replace("_", " ")
             val = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else ""
-            return f"Fill '{target}' with '{val}'" if target else f"Fill value '{val}'"
+        if "press" in raw_call:
+            func_name = getattr(call_node.func, "attr", "")
+            target = func_name.replace("press_", "").replace("_", " ")
+            key_val = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else "Enter"
+            return f"Press key '{key_val}' on '{target}'" if target else f"Press key '{key_val}'"
         if "assert" in raw_call or "expect" in raw_call:
             return f"Assert verification: {raw_call}"
         return f"Execute: {raw_call}"

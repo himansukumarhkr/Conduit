@@ -26,11 +26,35 @@ RECORDER_INJECTED_SCRIPT = """
     `;
     document.documentElement.appendChild(overlay);
 
+    let lastActiveElement = null;
+    let lastTypedValue = '';
+    let debounceTimer = null;
+
+    function flushActiveInput() {
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
+        if (lastActiveElement && lastTypedValue !== '') {
+            const meta = getElementMeta(lastActiveElement);
+            (window.__conduit_record__ || window.__testflow_record__)({
+                action: 'fill',
+                meta: meta,
+                value: lastTypedValue,
+                url: window.location.href,
+                timestamp: Date.now()
+            });
+            lastActiveElement = null;
+            lastTypedValue = '';
+        }
+    }
+
     const finishBtn = document.getElementById('__conduit_finish_btn__');
     if (finishBtn) {
         finishBtn.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
+            flushActiveInput();
             (window.__conduit_record__ || window.__testflow_record__)({
                 action: 'finish',
                 timestamp: Date.now()
@@ -80,8 +104,40 @@ RECORDER_INJECTED_SCRIPT = """
         return path.join(' > ');
     }
 
+    document.addEventListener('input', (e) => {
+        if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
+        lastActiveElement = e.target;
+        lastTypedValue = e.target.value !== undefined ? e.target.value : (e.target.innerText || '');
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            flushActiveInput();
+        }, 350);
+    }, true);
+
+    document.addEventListener('keydown', (e) => {
+        if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
+        if (e.key === 'Enter') {
+            const currentVal = e.target.value !== undefined ? e.target.value : (e.target.innerText || '');
+            if (currentVal !== '') {
+                lastActiveElement = e.target;
+                lastTypedValue = currentVal;
+                flushActiveInput();
+            }
+            const meta = getElementMeta(e.target);
+            (window.__conduit_record__ || window.__testflow_record__)({
+                action: 'press',
+                meta: meta,
+                value: 'Enter',
+                url: window.location.href,
+                timestamp: Date.now()
+            });
+        }
+    }, true);
+
     document.addEventListener('click', (e) => {
         if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
+
+        flushActiveInput();
 
         const meta = getElementMeta(e.target);
 
@@ -102,14 +158,15 @@ RECORDER_INJECTED_SCRIPT = """
 
     document.addEventListener('change', (e) => {
         if (e.target.closest('#__conduit_overlay__')) return;
-        const meta = getElementMeta(e.target);
-        (window.__conduit_record__ || window.__testflow_record__)({
-            action: 'fill',
-            meta: meta,
-            value: e.target.value || '',
-            url: window.location.href,
-            timestamp: Date.now()
-        });
+        lastActiveElement = e.target;
+        lastTypedValue = e.target.value !== undefined ? e.target.value : (e.target.innerText || '');
+        flushActiveInput();
+    }, true);
+
+    document.addEventListener('blur', (e) => {
+        if (lastActiveElement === e.target) {
+            flushActiveInput();
+        }
     }, true);
 
     function showAssertionMenu(x, y, meta, el) {
@@ -260,6 +317,16 @@ class BrowserRecorder:
 
             selector_info = SelectorEngine.rank_selector(meta)
             human_desc = SelectorEngine.generate_human_step(act_type, selector_info, val)
+
+            if act_type == "fill" and self.recorded_actions:
+                last_action = self.recorded_actions[-1]
+                if last_action.get("action") == "fill" and last_action.get("selector_info", {}).get("var_name") == selector_info.get("var_name"):
+                    last_action["value"] = val
+                    last_action["human_description"] = human_desc
+                    last_action["timestamp"] = event_data.get("timestamp", time.time())
+                    if self.on_action_recorded:
+                        self.on_action_recorded(last_action)
+                    return
 
             step_data = {
                 "action": act_type,

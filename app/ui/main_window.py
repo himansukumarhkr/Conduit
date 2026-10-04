@@ -5,22 +5,119 @@ import time
 from typing import List, Dict, Any
 
 from PySide6.QtCore import (
-    Qt, QRect, QRectF, QSize, QPoint, Signal, QObject, QPropertyAnimation, Property
+    Qt, QRect, QRectF, QSize, QPoint, Signal, QObject, QPropertyAnimation, Property, QThread
 )
 from PySide6.QtGui import (
-    QColor, QPainter, QBrush, QPen, QFont, QTextCharFormat, QSyntaxHighlighter
+    QColor, QPainter, QBrush, QPen, QFont, QTextCharFormat, QSyntaxHighlighter, QTextCursor
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QStyledItemDelegate, QPlainTextEdit, QScrollArea, QFrame, QDialog,
-    QLineEdit, QCheckBox, QProgressBar, QSplitter, QSizePolicy, QComboBox, QStyle
+    QLineEdit, QCheckBox, QProgressBar, QSplitter, QSizePolicy, QComboBox, QStyle,
+    QTabWidget, QInputDialog, QMessageBox
 )
+import ast
 
 from app.core.catalog_manager import CatalogManager
 from app.core.ast_normalizer import ASTNormalizer
 from app.core.recorder import BrowserRecorder
 from app.core.runner import TestRunner
+from app.core.test_data_manager import TestDataManager
+
+
+class CodeEditor(QPlainTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFont(QFont("Consolas", 10))
+        self.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #070b13;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                color: #e2e8f0;
+                padding: 8px;
+                selection-background-color: #1d4ed8;
+                selection-color: #ffffff;
+            }
+        """)
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key == Qt.Key_Return or key == Qt.Key_Enter:
+            cursor = self.textCursor()
+            line_text = cursor.block().text()
+            col = cursor.positionInBlock()
+            line_before_cursor = line_text[:col]
+            indent_match = re.match(r"^(\s*)", line_before_cursor)
+            indent = indent_match.group(1) if indent_match else ""
+            if line_before_cursor.rstrip().endswith(":"):
+                indent += "    "
+            cursor.insertText("\n" + indent)
+            self.setTextCursor(cursor)
+            return
+
+        elif key == Qt.Key_Tab:
+            cursor = self.textCursor()
+            if cursor.hasSelection():
+                start = cursor.selectionStart()
+                end = cursor.selectionEnd()
+                cursor.setPosition(start)
+                start_block = cursor.blockNumber()
+                cursor.setPosition(end)
+                end_block = cursor.blockNumber()
+
+                cursor.beginEditBlock()
+                b = self.document().findBlockByNumber(start_block)
+                while b.isValid() and b.blockNumber() <= end_block:
+                    c = QTextCursor(b)
+                    c.movePosition(QTextCursor.StartOfBlock)
+                    c.insertText("    ")
+                    b = b.next()
+                cursor.endEditBlock()
+            else:
+                cursor.insertText("    ")
+            return
+
+        elif key == Qt.Key_Backtab:
+            cursor = self.textCursor()
+            start = cursor.selectionStart()
+            end = cursor.selectionEnd()
+            cursor.setPosition(start)
+            start_block = cursor.blockNumber()
+            cursor.setPosition(end)
+            end_block = cursor.blockNumber()
+
+            cursor.beginEditBlock()
+            b = self.document().findBlockByNumber(start_block)
+            while b.isValid() and b.blockNumber() <= end_block:
+                text = b.text()
+                spaces = len(text) - len(text.lstrip(" "))
+                remove_count = min(spaces, 4)
+                if remove_count > 0:
+                    c = QTextCursor(b)
+                    c.movePosition(QTextCursor.StartOfBlock)
+                    for _ in range(remove_count):
+                        c.deleteChar()
+                b = b.next()
+            cursor.endEditBlock()
+            return
+
+        elif key == Qt.Key_Backspace:
+            cursor = self.textCursor()
+            if not cursor.hasSelection():
+                line_text = cursor.block().text()
+                col = cursor.positionInBlock()
+                line_before = line_text[:col]
+                if line_before and line_before.isspace() and len(line_before) % 4 == 0:
+                    cursor.beginEditBlock()
+                    for _ in range(4):
+                        cursor.deletePreviousChar()
+                    cursor.endEditBlock()
+                    return
+
+        super().keyPressEvent(event)
 
 
 class PythonHighlighter(QSyntaxHighlighter):
@@ -298,11 +395,13 @@ class RecordDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, current_settings: dict, parent=None):
+    def __init__(self, current_settings: dict, available_envs: list = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Conduit Settings")
-        self.setFixedSize(490, 460)
+        self.resize(560, 680)
+        self.setMinimumSize(520, 600)
         self.settings_data = dict(current_settings)
+        self.available_envs = available_envs or ["QA", "Staging", "Prod"]
         self.setStyleSheet("""
             QDialog {
                 background-color: #0d1527;
@@ -314,24 +413,53 @@ class SettingsDialog(QDialog):
                 font-size: 12px;
                 font-weight: bold;
             }
-            QLineEdit, QComboBox {
+            QLineEdit {
                 background-color: #070b13;
                 border: 1px solid #243048;
                 border-radius: 6px;
-                padding: 8px 12px;
+                padding: 6px 12px;
                 color: #ffffff;
                 font-size: 13px;
+                min-height: 36px;
+            }
+            QLineEdit:focus {
+                border-color: #38bdf8;
+            }
+            QComboBox {
+                background-color: #070b13;
+                border: 1px solid #243048;
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #ffffff;
+                font-size: 13px;
+                min-height: 36px;
+            }
+            QComboBox:focus, QComboBox:hover {
+                border-color: #38bdf8;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 28px;
+                border-left: 1px solid #1e293b;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #0d1527;
+                color: #ffffff;
                 selection-background-color: #2563eb;
                 selection-color: #ffffff;
-            }
-            QLineEdit:focus, QComboBox:focus {
-                border-color: #38bdf8;
+                border: 1px solid #2a3a5e;
+                outline: none;
+                padding: 4px;
             }
             QCheckBox {
                 color: #f1f5f9;
                 font-size: 13px;
                 font-weight: 500;
-                spacing: 8px;
+                spacing: 10px;
+                min-height: 24px;
             }
             QCheckBox::indicator {
                 width: 18px;
@@ -344,14 +472,19 @@ class SettingsDialog(QDialog):
                 background-color: #2563eb;
                 border-color: #3b82f6;
             }
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
             QPushButton#btnSave {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
                 color: white;
                 font-weight: bold;
                 border-radius: 8px;
-                padding: 10px 20px;
+                padding: 10px 22px;
                 font-size: 13px;
                 border: none;
+                min-height: 36px;
             }
             QPushButton#btnSave:hover {
                 background: #0369a1;
@@ -361,18 +494,31 @@ class SettingsDialog(QDialog):
                 border: 1px solid #2a3a5e;
                 color: #93c5fd;
                 border-radius: 8px;
-                padding: 10px 18px;
+                padding: 10px 20px;
                 font-size: 13px;
+                min-height: 36px;
+            }
+            QPushButton#btnCancel:hover {
+                border-color: #3b82f6;
             }
         """)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(14)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(24, 20, 24, 20)
+        main_layout.setSpacing(14)
 
         title = QLabel("Framework & Execution Settings")
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
-        layout.addWidget(title)
+        main_layout.addWidget(title)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("background: transparent; border: none;")
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(4, 4, 12, 4)
+        layout.setSpacing(12)
 
         layout.addWidget(QLabel("Default Browser Channel"))
         self.browser_combo = QComboBox()
@@ -392,8 +538,10 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(QLabel("Default Environment Target"))
         self.env_combo = QComboBox()
-        self.env_combo.addItems(["QA", "Staging", "Prod"])
-        self.env_combo.setCurrentText(self.settings_data.get("env", "QA"))
+        self.env_combo.addItems(self.available_envs)
+        cur_env = self.settings_data.get("env", "QA")
+        if cur_env in self.available_envs:
+            self.env_combo.setCurrentText(cur_env)
         layout.addWidget(self.env_combo)
 
         layout.addWidget(QLabel("Assertion Timeout (ms)"))
@@ -428,7 +576,8 @@ class SettingsDialog(QDialog):
             self.format_combo.setCurrentIndex(0)
         layout.addWidget(self.format_combo)
 
-        layout.addStretch()
+        scroll.setWidget(container)
+        main_layout.addWidget(scroll, 1)
 
         btn_box = QHBoxLayout()
         btn_box.addStretch()
@@ -443,7 +592,7 @@ class SettingsDialog(QDialog):
         save_btn.setCursor(Qt.PointingHandCursor)
         save_btn.clicked.connect(self.on_save)
         btn_box.addWidget(save_btn)
-        layout.addLayout(btn_box)
+        main_layout.addLayout(btn_box)
 
     def on_save(self):
         b_idx = self.browser_combo.currentIndex()
@@ -650,6 +799,605 @@ class HistoryDialog(QDialog):
         layout.addLayout(b_box)
 
 
+class ScraperWorker(QThread):
+    finished_scrape = Signal(dict)
+    error_scrape = Signal(str)
+
+    def __init__(self, mgr: TestDataManager, url: str, browser_channel: str = "msedge"):
+        super().__init__()
+        self.mgr = mgr
+        self.url = url
+        self.browser_channel = browser_channel
+
+    def run(self):
+        try:
+            res = self.mgr.scrape_test_data_from_url(self.url, self.browser_channel)
+            self.finished_scrape.emit(res)
+        except Exception as e:
+            self.error_scrape.emit(str(e))
+
+
+class TestDataDialog(QDialog):
+    def __init__(self, test_data_mgr: TestDataManager, current_env: str = "QA", parent=None):
+        super().__init__(parent)
+        self.mgr = test_data_mgr
+        self.current_env = current_env
+        self.scraped_data_cache = {}
+        self.setWindowTitle("Conduit - Test Data & Environments")
+        self.resize(880, 680)
+        self.setMinimumSize(800, 600)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0d1527;
+                border: 1px solid #2a3a5e;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #94a3b8;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QTabWidget::pane {
+                border: 1px solid #1e293b;
+                background-color: #0b1120;
+                border-radius: 8px;
+            }
+            QTabBar::tab {
+                background-color: #131b2e;
+                color: #94a3b8;
+                padding: 8px 18px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                margin-right: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #0b1120;
+                color: #38bdf8;
+                border-top: 2px solid #38bdf8;
+            }
+            QLineEdit, QComboBox {
+                background-color: #070b13;
+                border: 1px solid #243048;
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #ffffff;
+                font-size: 13px;
+                min-height: 36px;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border-color: #38bdf8;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 28px;
+                border-left: 1px solid #1e293b;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #0d1527;
+                color: #ffffff;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+                border: 1px solid #2a3a5e;
+                outline: none;
+                padding: 4px;
+            }
+            QTableWidget {
+                background-color: #070b13;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                gridline-color: #1e293b;
+                color: #f8fafc;
+                font-size: 12px;
+            }
+            QHeaderView::section {
+                background-color: #0f172a;
+                color: #94a3b8;
+                padding: 6px 10px;
+                font-weight: bold;
+                border: none;
+                border-bottom: 1px solid #1e293b;
+            }
+            QPushButton {
+                background-color: #1e293b;
+                color: #f1f5f9;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: bold;
+                border: 1px solid #334155;
+                min-height: 34px;
+            }
+            QPushButton:hover {
+                background-color: #2563eb;
+                border-color: #3b82f6;
+            }
+            QPushButton#btnPrimary {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
+                border: none;
+                color: white;
+            }
+            QPushButton#btnPrimary:hover {
+                background: #0369a1;
+            }
+            QPushButton#btnSuccess {
+                background-color: #10b981;
+                border: none;
+                color: white;
+            }
+            QPushButton#btnSuccess:hover {
+                background-color: #059669;
+            }
+            QPushButton#btnDanger {
+                background-color: rgba(239, 68, 68, 0.15);
+                border: 1px solid #ef4444;
+                color: #f87171;
+            }
+            QPushButton#btnDanger:hover {
+                background-color: #ef4444;
+                color: white;
+            }
+        """)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(24, 20, 24, 20)
+        main_layout.setSpacing(14)
+
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(QLabel("Target Environment:"))
+        self.env_combo = QComboBox()
+        self.refresh_env_list()
+        self.env_combo.currentTextChanged.connect(self.on_env_changed)
+        header_layout.addWidget(self.env_combo)
+
+        add_env_btn = QPushButton("+ Add Environment")
+        add_env_btn.setCursor(Qt.PointingHandCursor)
+        add_env_btn.clicked.connect(self.add_new_environment)
+        header_layout.addWidget(add_env_btn)
+
+        del_env_btn = QPushButton("Remove Environment")
+        del_env_btn.setObjectName("btnDanger")
+        del_env_btn.setCursor(Qt.PointingHandCursor)
+        del_env_btn.clicked.connect(self.remove_current_environment)
+        header_layout.addWidget(del_env_btn)
+
+        header_layout.addStretch()
+        self.env_badge_lbl = QLabel(f"Active Context: {self.current_env}")
+        self.env_badge_lbl.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 13px;")
+        header_layout.addWidget(self.env_badge_lbl)
+        main_layout.addLayout(header_layout)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.build_variables_tab(), "Key-Value Variables")
+        self.tabs.addTab(self.build_datasets_tab(), "Datasets & Tables")
+        self.tabs.addTab(self.build_scraper_tab(), "🕸️ Web Scraper")
+        main_layout.addWidget(self.tabs, 1)
+
+        bottom_box = QHBoxLayout()
+        self.status_msg = QLabel("")
+        self.status_msg.setStyleSheet("color: #34d399; font-size: 12px; font-weight: bold;")
+        bottom_box.addWidget(self.status_msg)
+        bottom_box.addStretch()
+
+        close_btn = QPushButton("Done")
+        close_btn.setObjectName("btnPrimary")
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.clicked.connect(self.accept)
+        bottom_box.addWidget(close_btn)
+        main_layout.addLayout(bottom_box)
+
+        self.load_environment_data()
+
+    def refresh_env_list(self):
+        self.env_combo.blockSignals(True)
+        self.env_combo.clear()
+        envs = self.mgr.get_environments()
+        self.env_combo.addItems(envs)
+        if self.current_env in envs:
+            self.env_combo.setCurrentText(self.current_env)
+        elif envs:
+            self.current_env = envs[0]
+            self.env_combo.setCurrentText(self.current_env)
+        self.env_combo.blockSignals(False)
+
+    def on_env_changed(self, new_env):
+        if not new_env:
+            return
+        self.current_env = new_env
+        self.mgr.set_active_environment(new_env)
+        self.env_badge_lbl.setText(f"Active Context: {new_env}")
+        self.load_environment_data()
+
+    def add_new_environment(self):
+        name, ok = QInputDialog.getText(self, "Add Environment", "New environment name (e.g. UAT, DEV, STAGING-2):")
+        if ok and name.strip():
+            clean_name = name.strip()
+            if self.mgr.add_environment(clean_name):
+                self.current_env = clean_name
+                self.refresh_env_list()
+                self.load_environment_data()
+                self.status_msg.setText(f"Created environment [{clean_name}]")
+            else:
+                QMessageBox.warning(self, "Conduit", f"Environment '{clean_name}' already exists.")
+
+    def remove_current_environment(self):
+        envs = self.mgr.get_environments()
+        if len(envs) <= 1:
+            QMessageBox.warning(self, "Conduit", "Cannot remove the only remaining environment.")
+            return
+        res = QMessageBox.question(self, "Conduit", f"Delete environment '{self.current_env}' and all its test data?")
+        if res == QMessageBox.Yes:
+            old_env = self.current_env
+            self.mgr.remove_environment(old_env)
+            self.current_env = self.mgr.get_active_environment()
+            self.refresh_env_list()
+            self.load_environment_data()
+            self.status_msg.setText(f"Removed environment [{old_env}]")
+
+    def build_variables_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        self.var_table = QTableWidget(0, 3)
+        self.var_table.setHorizontalHeaderLabels(["Variable Name", "Value", "Action"])
+        self.var_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.var_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.var_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        self.var_table.setColumnWidth(0, 240)
+        self.var_table.setColumnWidth(2, 90)
+        layout.addWidget(self.var_table, 1)
+
+        input_row = QHBoxLayout()
+        self.new_key_edit = QLineEdit()
+        self.new_key_edit.setPlaceholderText("Variable Key (e.g. base_url, timeout, username)")
+        input_row.addWidget(self.new_key_edit, 2)
+
+        self.new_val_edit = QLineEdit()
+        self.new_val_edit.setPlaceholderText("Value")
+        input_row.addWidget(self.new_val_edit, 3)
+
+        add_btn = QPushButton("+ Add Variable")
+        add_btn.setCursor(Qt.PointingHandCursor)
+        add_btn.clicked.connect(self.on_add_variable)
+        input_row.addWidget(add_btn)
+
+        save_vars_btn = QPushButton("💾 Save Variables")
+        save_vars_btn.setObjectName("btnPrimary")
+        save_vars_btn.setCursor(Qt.PointingHandCursor)
+        save_vars_btn.clicked.connect(self.save_variables_table)
+        input_row.addWidget(save_vars_btn)
+
+        layout.addLayout(input_row)
+        return widget
+
+    def build_datasets_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        top_row = QHBoxLayout()
+        top_row.addWidget(QLabel("Dataset:"))
+        self.dataset_combo = QComboBox()
+        self.dataset_combo.currentTextChanged.connect(self.on_dataset_selection_changed)
+        top_row.addWidget(self.dataset_combo, 2)
+
+        new_ds_btn = QPushButton("+ New Dataset")
+        new_ds_btn.setCursor(Qt.PointingHandCursor)
+        new_ds_btn.clicked.connect(self.create_new_dataset)
+        top_row.addWidget(new_ds_btn)
+
+        del_ds_btn = QPushButton("Delete Dataset")
+        del_ds_btn.setObjectName("btnDanger")
+        del_ds_btn.setCursor(Qt.PointingHandCursor)
+        del_ds_btn.clicked.connect(self.delete_current_dataset)
+        top_row.addWidget(del_ds_btn)
+
+        top_row.addStretch()
+
+        add_row_btn = QPushButton("+ Add Row")
+        add_row_btn.setCursor(Qt.PointingHandCursor)
+        add_row_btn.clicked.connect(self.add_dataset_row)
+        top_row.addWidget(add_row_btn)
+
+        del_row_btn = QPushButton("- Del Row")
+        del_row_btn.setCursor(Qt.PointingHandCursor)
+        del_row_btn.clicked.connect(self.del_dataset_row)
+        top_row.addWidget(del_row_btn)
+
+        add_col_btn = QPushButton("+ Add Column")
+        add_col_btn.setCursor(Qt.PointingHandCursor)
+        add_col_btn.clicked.connect(self.add_dataset_column)
+        top_row.addWidget(add_col_btn)
+
+        save_ds_btn = QPushButton("💾 Save Dataset")
+        save_ds_btn.setObjectName("btnPrimary")
+        save_ds_btn.setCursor(Qt.PointingHandCursor)
+        save_ds_btn.clicked.connect(self.save_dataset_table)
+        top_row.addWidget(save_ds_btn)
+
+        layout.addLayout(top_row)
+
+        self.dataset_table = QTableWidget(0, 0)
+        layout.addWidget(self.dataset_table, 1)
+        return widget
+
+    def build_scraper_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        url_row = QHBoxLayout()
+        self.scraper_url_edit = QLineEdit("https://demo.playwright.dev/todomvc/")
+        self.scraper_url_edit.setPlaceholderText("Enter web page URL to scrape test data from...")
+        url_row.addWidget(self.scraper_url_edit, 3)
+
+        self.btn_scrape = QPushButton("⚡ Scrape Page Test Data")
+        self.btn_scrape.setObjectName("btnPrimary")
+        self.btn_scrape.setCursor(Qt.PointingHandCursor)
+        self.btn_scrape.clicked.connect(self.run_live_scraper)
+        url_row.addWidget(self.btn_scrape)
+
+        layout.addLayout(url_row)
+
+        self.scraper_status_lbl = QLabel("Ready to scrape form fields, test tables, and dataset items.")
+        self.scraper_status_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        layout.addWidget(self.scraper_status_lbl)
+
+        split = QSplitter(Qt.Horizontal)
+
+        left_box = QFrame()
+        left_layout = QVBoxLayout(left_box)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.addWidget(QLabel("Extracted Form Inputs & Variables"))
+        self.scraped_inputs_table = QTableWidget(0, 2)
+        self.scraped_inputs_table.setHorizontalHeaderLabels(["Name / Key", "Sample Value"])
+        self.scraped_inputs_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.scraped_inputs_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        left_layout.addWidget(self.scraped_inputs_table)
+        split.addWidget(left_box)
+
+        right_box = QFrame()
+        right_layout = QVBoxLayout(right_box)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addWidget(QLabel("Extracted Data Tables / Lists"))
+        self.scraped_tables_table = QTableWidget(0, 2)
+        self.scraped_tables_table.setHorizontalHeaderLabels(["Dataset Name", "Records Found"])
+        self.scraped_tables_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.scraped_tables_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        right_layout.addWidget(self.scraped_tables_table)
+        split.addWidget(right_box)
+
+        layout.addWidget(split, 1)
+
+        import_row = QHBoxLayout()
+        import_row.addStretch()
+        self.btn_import_scraped = QPushButton("📥 Import Scraped Data into Environment")
+        self.btn_import_scraped.setObjectName("btnSuccess")
+        self.btn_import_scraped.setCursor(Qt.PointingHandCursor)
+        self.btn_import_scraped.clicked.connect(self.import_scraped_data)
+        import_row.addWidget(self.btn_import_scraped)
+        layout.addLayout(import_row)
+
+        return widget
+
+    def load_environment_data(self):
+        data = self.mgr.get_environment_data(self.current_env)
+        variables = data.get("variables", {})
+
+        self.var_table.setRowCount(len(variables))
+        for row, (k, v) in enumerate(variables.items()):
+            self.var_table.setRowHeight(row, 36)
+            k_item = QTableWidgetItem(str(k))
+            v_item = QTableWidgetItem(str(v))
+            self.var_table.setItem(row, 0, k_item)
+            self.var_table.setItem(row, 1, v_item)
+
+            del_btn = QPushButton("Delete")
+            del_btn.setCursor(Qt.PointingHandCursor)
+            del_btn.setStyleSheet("background-color: transparent; border: 1px solid #ef4444; color: #f87171; font-size: 11px; padding: 2px 6px; border-radius: 4px;")
+            del_btn.clicked.connect(lambda _, key=k: self.delete_variable(key))
+            self.var_table.setCellWidget(row, 2, del_btn)
+
+        datasets = data.get("datasets", {})
+        self.dataset_combo.blockSignals(True)
+        self.dataset_combo.clear()
+        self.dataset_combo.addItems(list(datasets.keys()))
+        self.dataset_combo.blockSignals(False)
+
+        if datasets:
+            self.load_dataset_table(list(datasets.keys())[0])
+        else:
+            self.dataset_table.setRowCount(0)
+            self.dataset_table.setColumnCount(0)
+
+        if "base_url" in variables:
+            self.scraper_url_edit.setText(variables["base_url"])
+
+    def on_add_variable(self):
+        k = self.new_key_edit.text().strip()
+        v = self.new_val_edit.text().strip()
+        if not k:
+            return
+        self.mgr.set_variable(self.current_env, k, v)
+        self.new_key_edit.clear()
+        self.new_val_edit.clear()
+        self.load_environment_data()
+        self.status_msg.setText(f"Added variable '{k}'")
+
+    def delete_variable(self, key):
+        self.mgr.delete_variable(self.current_env, key)
+        self.load_environment_data()
+        self.status_msg.setText(f"Deleted variable '{key}'")
+
+    def save_variables_table(self):
+        new_vars = {}
+        for r in range(self.var_table.rowCount()):
+            k_item = self.var_table.item(r, 0)
+            v_item = self.var_table.item(r, 1)
+            if k_item and k_item.text().strip():
+                k = k_item.text().strip()
+                v = v_item.text().strip() if v_item else ""
+                new_vars[k] = v
+        env_data = self.mgr.get_environment_data(self.current_env)
+        env_data["variables"] = new_vars
+        self.mgr.save_environment_data(self.current_env, env_data)
+        self.load_environment_data()
+        self.status_msg.setText(f"Variables saved for [{self.current_env}]")
+
+    def on_dataset_selection_changed(self, ds_name):
+        if ds_name:
+            self.load_dataset_table(ds_name)
+
+    def load_dataset_table(self, ds_name):
+        datasets = self.mgr.get_datasets(self.current_env)
+        records = datasets.get(ds_name, [])
+        if not records:
+            self.dataset_table.setRowCount(0)
+            self.dataset_table.setColumnCount(1)
+            self.dataset_table.setHorizontalHeaderLabels(["value"])
+            return
+
+        headers = list(records[0].keys())
+        self.dataset_table.setColumnCount(len(headers))
+        self.dataset_table.setHorizontalHeaderLabels(headers)
+        self.dataset_table.setRowCount(len(records))
+
+        for r_idx, rec in enumerate(records):
+            self.dataset_table.setRowHeight(r_idx, 34)
+            for c_idx, h in enumerate(headers):
+                val = rec.get(h, "")
+                item = QTableWidgetItem(str(val))
+                self.dataset_table.setItem(r_idx, c_idx, item)
+
+    def create_new_dataset(self):
+        name, ok = QInputDialog.getText(self, "New Dataset", "Enter dataset name (e.g. products, customers):")
+        if ok and name.strip():
+            clean = name.strip()
+            self.mgr.save_dataset(self.current_env, clean, [{"id": 1, "name": "sample_record"}])
+            self.load_environment_data()
+            self.dataset_combo.setCurrentText(clean)
+            self.status_msg.setText(f"Created dataset '{clean}'")
+
+    def delete_current_dataset(self):
+        cur = self.dataset_combo.currentText()
+        if not cur:
+            return
+        res = QMessageBox.question(self, "Conduit", f"Delete dataset '{cur}'?")
+        if res == QMessageBox.Yes:
+            self.mgr.delete_dataset(self.current_env, cur)
+            self.load_environment_data()
+            self.status_msg.setText(f"Deleted dataset '{cur}'")
+
+    def add_dataset_row(self):
+        r = self.dataset_table.rowCount()
+        self.dataset_table.insertRow(r)
+        self.dataset_table.setRowHeight(r, 34)
+
+    def del_dataset_row(self):
+        r = self.dataset_table.currentRow()
+        if r >= 0:
+            self.dataset_table.removeRow(r)
+
+    def add_dataset_column(self):
+        col_name, ok = QInputDialog.getText(self, "Add Column", "Enter new column name:")
+        if ok and col_name.strip():
+            c = self.dataset_table.columnCount()
+            self.dataset_table.insertColumn(c)
+            self.dataset_table.setHorizontalHeaderItem(c, QTableWidgetItem(col_name.strip()))
+
+    def save_dataset_table(self):
+        ds_name = self.dataset_combo.currentText()
+        if not ds_name:
+            return
+        headers = []
+        for c in range(self.dataset_table.columnCount()):
+            h_item = self.dataset_table.horizontalHeaderItem(c)
+            headers.append(h_item.text().strip() if h_item else f"col_{c+1}")
+
+        records = []
+        for r in range(self.dataset_table.rowCount()):
+            rec = {}
+            for c, h in enumerate(headers):
+                cell = self.dataset_table.item(r, c)
+                rec[h] = cell.text().strip() if cell else ""
+            records.append(rec)
+
+        self.mgr.save_dataset(self.current_env, ds_name, records)
+        self.status_msg.setText(f"Saved dataset '{ds_name}' ({len(records)} records)")
+
+    def run_live_scraper(self):
+        url = self.scraper_url_edit.text().strip()
+        if not url:
+            return
+        self.btn_scrape.setEnabled(False)
+        self.btn_scrape.setText("Scraping...")
+        self.scraper_status_lbl.setText("Scraping page elements, form inputs, and data tables in background...")
+
+        self.worker = ScraperWorker(self.mgr, url)
+        self.worker.finished_scrape.connect(self.on_scrape_finished)
+        self.worker.error_scrape.connect(self.on_scrape_error)
+        self.worker.start()
+
+    def on_scrape_finished(self, res: dict):
+        self.btn_scrape.setEnabled(True)
+        self.btn_scrape.setText("⚡ Scrape Page Test Data")
+        self.scraped_data_cache = res
+
+        vars_found = res.get("variables", {})
+        datasets_found = res.get("datasets", {})
+        title = res.get("title", "")
+
+        self.scraper_status_lbl.setText(f"Scraped '{title}': Found {len(vars_found)} input variables and {len(datasets_found)} dataset tables.")
+
+        self.scraped_inputs_table.setRowCount(len(vars_found))
+        for row, (k, v) in enumerate(vars_found.items()):
+            self.scraped_inputs_table.setItem(row, 0, QTableWidgetItem(str(k)))
+            self.scraped_inputs_table.setItem(row, 1, QTableWidgetItem(str(v)))
+
+        self.scraped_tables_table.setRowCount(len(datasets_found))
+        for row, (d_name, d_rows) in enumerate(datasets_found.items()):
+            self.scraped_tables_table.setItem(row, 0, QTableWidgetItem(str(d_name)))
+            self.scraped_tables_table.setItem(row, 1, QTableWidgetItem(f"{len(d_rows)} rows"))
+
+        self.status_msg.setText(f"Scrape successful for {res.get('url')}")
+
+    def on_scrape_error(self, err_msg: str):
+        self.btn_scrape.setEnabled(True)
+        self.btn_scrape.setText("⚡ Scrape Page Test Data")
+        self.scraper_status_lbl.setText(f"Scrape error: {err_msg}")
+        self.status_msg.setText("Scraping failed")
+
+    def import_scraped_data(self):
+        if not self.scraped_data_cache:
+            QMessageBox.information(self, "Conduit", "No scraped data to import. Please run the scraper first.")
+            return
+
+        vars_to_import = self.scraped_data_cache.get("variables", {})
+        datasets_to_import = self.scraped_data_cache.get("datasets", {})
+
+        env_data = self.mgr.get_environment_data(self.current_env)
+        if "variables" not in env_data:
+            env_data["variables"] = {}
+        if "datasets" not in env_data:
+            env_data["datasets"] = {}
+
+        env_data["variables"].update(vars_to_import)
+        env_data["datasets"].update(datasets_to_import)
+
+        self.mgr.save_environment_data(self.current_env, env_data)
+        self.load_environment_data()
+        self.status_msg.setText(f"Imported {len(vars_to_import)} variables and {len(datasets_to_import)} datasets into [{self.current_env}]!")
+        QMessageBox.information(self, "Conduit", f"Successfully imported scraped data into environment [{self.current_env}].")
+
+
 class ConduitMainWindow(QMainWindow):
     def __init__(self, workspace_dir: str):
         super().__init__()
@@ -657,27 +1405,28 @@ class ConduitMainWindow(QMainWindow):
         self.catalog = CatalogManager(workspace_dir)
         self.ast_engine = ASTNormalizer()
         self.runner = TestRunner(workspace_dir)
+        self.test_data_mgr = TestDataManager(workspace_dir)
         self.recorder = None
         self._current_recording_meta = {}
 
         self.last_evidence_dir = ""
         self.last_docx_report = ""
 
+        self.current_env = self.test_data_mgr.get_active_environment()
+        self.selected_browser = "msedge"
+        self.headless = True
+        self.selected_scenario_id = "sc_001"
+
         self.settings = {
             "browser": "msedge",
             "base_url": "https://demo.playwright.dev/todomvc/",
-            "env": "QA",
+            "env": self.current_env,
             "timeout": 5000,
             "headless": True,
             "record_traces": True,
             "capture_evidence": True,
             "evidence_format": "both"
         }
-
-        self.current_env = "QA"
-        self.selected_browser = "msedge"
-        self.headless = True
-        self.selected_scenario_id = "sc_001"
 
         self.bridge = ExecutionBridge()
         self.bridge.log_signal.connect(self.append_log)
@@ -872,7 +1621,7 @@ class ConduitMainWindow(QMainWindow):
         self.load_scenarios()
 
     def open_settings(self):
-        dlg = SettingsDialog(self.settings, self)
+        dlg = SettingsDialog(self.settings, self.test_data_mgr.get_environments(), self)
         if dlg.exec() == QDialog.Accepted:
             self.settings = dlg.get_settings()
             self.set_environment(self.settings.get("env", "QA"))
@@ -913,16 +1662,52 @@ class ConduitMainWindow(QMainWindow):
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
         layout.addWidget(title)
 
-        env_box = QHBoxLayout()
-        env_box.setSpacing(6)
-        self.env_qa_btn = self._make_env_pill("QA", active=True)
-        self.env_stage_btn = self._make_env_pill("Staging")
-        self.env_prod_btn = self._make_env_pill("Prod")
+        self.env_pill_box = QHBoxLayout()
+        self.env_pill_box.setSpacing(6)
+        layout.addLayout(self.env_pill_box)
 
-        env_box.addWidget(self.env_qa_btn)
-        env_box.addWidget(self.env_stage_btn)
-        env_box.addWidget(self.env_prod_btn)
-        layout.addLayout(env_box)
+        add_env_btn = QPushButton("+ Env")
+        add_env_btn.setCursor(Qt.PointingHandCursor)
+        add_env_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: 1px dashed #334155;
+                color: #94a3b8;
+                font-size: 11px;
+                font-weight: bold;
+                border-radius: 14px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover {
+                color: #38bdf8;
+                border-color: #38bdf8;
+            }
+        """)
+        add_env_btn.clicked.connect(self.quick_add_env)
+        layout.addWidget(add_env_btn)
+
+        test_data_btn = QPushButton("📊 Test Data")
+        test_data_btn.setCursor(Qt.PointingHandCursor)
+        test_data_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #38bdf8;
+                font-size: 11px;
+                font-weight: bold;
+                border-radius: 14px;
+                padding: 4px 12px;
+            }
+            QPushButton:hover {
+                background-color: #1e293b;
+                border-color: #38bdf8;
+                color: #ffffff;
+            }
+        """)
+        test_data_btn.clicked.connect(self.open_test_data_dialog)
+        layout.addWidget(test_data_btn)
+
+        self.render_env_pills()
 
         layout.addStretch()
 
@@ -1010,6 +1795,20 @@ class ConduitMainWindow(QMainWindow):
 
         return bar
 
+    def render_env_pills(self):
+        while self.env_pill_box.count():
+            item = self.env_pill_box.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        envs = self.test_data_mgr.get_environments()
+        if self.current_env not in envs and envs:
+            self.current_env = envs[0]
+            self.test_data_mgr.set_active_environment(self.current_env)
+        for env_name in envs:
+            btn = self._make_env_pill(env_name, active=(env_name == self.current_env))
+            self.env_pill_box.addWidget(btn)
+
     def _make_env_pill(self, env_name, active=False):
         btn = QPushButton(env_name)
         btn.setCursor(Qt.PointingHandCursor)
@@ -1041,17 +1840,29 @@ class ConduitMainWindow(QMainWindow):
                     border-color: #334155;
                 }
             """)
-        btn.clicked.connect(lambda: self.set_environment(env_name))
+        btn.clicked.connect(lambda _, en=env_name: self.set_environment(en))
         return btn
 
     def set_environment(self, env_name):
         self.current_env = env_name
-        for name, b in [("QA", self.env_qa_btn), ("Staging", self.env_stage_btn), ("Prod", self.env_prod_btn)]:
-            if name == env_name:
-                b.setStyleSheet("background-color: rgba(37, 99, 235, 0.2); border: 1px solid #2563eb; color: #60a5fa; font-size: 11px; font-weight: bold; border-radius: 14px; padding: 4px 12px;")
-            else:
-                b.setStyleSheet("background-color: transparent; border: 1px solid #1e293b; color: #64748b; font-size: 11px; font-weight: bold; border-radius: 14px; padding: 4px 12px;")
+        self.test_data_mgr.set_active_environment(env_name)
+        self.render_env_pills()
         self.append_log("INFO", f"Switched environment context to [{env_name}]")
+
+    def quick_add_env(self):
+        name, ok = QInputDialog.getText(self, "Add Environment", "New environment name (e.g. UAT, DEV, STAGING-2):")
+        if ok and name.strip():
+            clean_name = name.strip()
+            if self.test_data_mgr.add_environment(clean_name):
+                self.set_environment(clean_name)
+                self.append_log("SUCCESS", f"Environment [{clean_name}] created and activated.")
+            else:
+                self.append_log("WARNING", f"Environment [{clean_name}] already exists.")
+
+    def open_test_data_dialog(self):
+        dlg = TestDataDialog(self.test_data_mgr, self.current_env, self)
+        dlg.exec()
+        self.render_env_pills()
 
     def set_browser(self, b_name):
         self.selected_browser = b_name
@@ -1230,22 +2041,37 @@ class ConduitMainWindow(QMainWindow):
         code_layout.setSpacing(6)
 
         code_hdr = QHBoxLayout()
-        self.code_filename_lbl = QLabel("login_page.py")
-        self.code_filename_lbl.setStyleSheet("color: #64748b; font-size: 11px;")
+        self.code_filename_lbl = QLabel("test_spec.py")
+        self.code_filename_lbl.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
         code_hdr.addWidget(self.code_filename_lbl)
+
+        self.code_status_lbl = QLabel("[Saved]")
+        self.code_status_lbl.setStyleSheet("color: #34d399; font-size: 11px; font-weight: bold; margin-left: 8px;")
+        code_hdr.addWidget(self.code_status_lbl)
+
         code_hdr.addStretch()
 
-        copy_btn = QPushButton("Copy")
+        self.btn_save_code = QPushButton("💾 Save Code")
+        self.btn_save_code.setCursor(Qt.PointingHandCursor)
+        self.btn_save_code.setStyleSheet("background-color: #0284c7; color: #ffffff; font-size: 11px; font-weight: bold; border-radius: 4px; padding: 4px 10px; border: none;")
+        self.btn_save_code.clicked.connect(self.save_current_code)
+        code_hdr.addWidget(self.btn_save_code)
+
+        self.btn_run_code = QPushButton("▶ Run Flow")
+        self.btn_run_code.setCursor(Qt.PointingHandCursor)
+        self.btn_run_code.setStyleSheet("background-color: #10b981; color: #ffffff; font-size: 11px; font-weight: bold; border-radius: 4px; padding: 4px 10px; border: none;")
+        self.btn_run_code.clicked.connect(self.run_current_flow)
+        code_hdr.addWidget(self.btn_run_code)
+
+        copy_btn = QPushButton("📋 Copy")
         copy_btn.setCursor(Qt.PointingHandCursor)
-        copy_btn.setStyleSheet("background-color: #1e293b; color: #94a3b8; font-size: 10px; border-radius: 4px; padding: 2px 8px; border: none;")
+        copy_btn.setStyleSheet("background-color: #1e293b; color: #94a3b8; font-size: 11px; border-radius: 4px; padding: 4px 8px; border: 1px solid #334155;")
         copy_btn.clicked.connect(self.copy_code)
         code_hdr.addWidget(copy_btn)
         code_layout.addLayout(code_hdr)
 
-        self.code_edit = QPlainTextEdit()
-        self.code_edit.setReadOnly(True)
-        self.code_edit.setFont(QFont("Consolas", 10))
-        self.code_edit.setStyleSheet("background-color: transparent; border: none; color: #93c5fd;")
+        self.code_edit = CodeEditor()
+        self.code_edit.textChanged.connect(self.on_code_text_changed)
         self.highlighter = PythonHighlighter(self.code_edit.document())
         code_layout.addWidget(self.code_edit)
 
@@ -1349,6 +2175,18 @@ class ConduitMainWindow(QMainWindow):
         return bar
 
     def load_scenarios(self):
+        checked_ids = set()
+        has_existing = self.table.rowCount() > 0
+        if has_existing:
+            for r in range(self.table.rowCount()):
+                chk = self.table.item(r, 0)
+                name_it = self.table.item(r, 1)
+                if chk and name_it and chk.checkState() == Qt.Checked:
+                    sid = name_it.data(Qt.UserRole)
+                    if sid:
+                        checked_ids.add(sid)
+
+        current_selected = getattr(self, "selected_scenario_id", None)
         scenarios = self.catalog.get_all_scenarios()
         self.table.setRowCount(len(scenarios))
         self.status_lbl.setText(f"Ready - {len(scenarios)} scenario(s) loaded")
@@ -1356,13 +2194,17 @@ class ConduitMainWindow(QMainWindow):
         for row, sc in enumerate(scenarios):
             self.table.setRowHeight(row, 44)
 
+            sid = sc.get("id")
             chk_item = QTableWidgetItem()
             chk_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            chk_item.setCheckState(Qt.Checked if row < 3 else Qt.Unchecked)
+            if has_existing:
+                chk_item.setCheckState(Qt.Checked if sid in checked_ids else Qt.Unchecked)
+            else:
+                chk_item.setCheckState(Qt.Checked if row < 3 else Qt.Unchecked)
             self.table.setItem(row, 0, chk_item)
 
             name_item = QTableWidgetItem(sc.get("name", ""))
-            name_item.setData(Qt.UserRole, sc.get("id"))
+            name_item.setData(Qt.UserRole, sid)
             name_item.setForeground(QColor("#f8fafc"))
             self.table.setItem(row, 1, name_item)
 
@@ -1391,8 +2233,7 @@ class ConduitMainWindow(QMainWindow):
             play_btn.setFixedSize(22, 22)
             play_btn.setCursor(Qt.PointingHandCursor)
             play_btn.setStyleSheet("background: transparent; color: #94a3b8; font-size: 11px; border: none;")
-            s_id = sc.get("id")
-            play_btn.clicked.connect(lambda _, sid=s_id: self.run_single_test(sid))
+            play_btn.clicked.connect(lambda _, s_id=sid: self.run_single_test(s_id))
             act_layout.addWidget(play_btn)
 
             more_lbl = QLabel("•••")
@@ -1403,7 +2244,8 @@ class ConduitMainWindow(QMainWindow):
             self.table.setCellWidget(row, 6, actions_widget)
 
         if scenarios:
-            self.select_scenario(scenarios[0].get("id"))
+            target_id = current_selected if current_selected and any(s.get("id") == current_selected for s in scenarios) else scenarios[0].get("id")
+            self.select_scenario(target_id)
 
     def on_table_cell_clicked(self, row, col):
         name_item = self.table.item(row, 1)
@@ -1465,8 +2307,53 @@ class ConduitMainWindow(QMainWindow):
 
         self.steps_container_layout.addStretch()
 
+        self._loading_code = True
         self.code_filename_lbl.setText(sc.get("file_name", "test_spec.py"))
         self.code_edit.setPlainText(sc.get("code", ""))
+        self.code_status_lbl.setText("[Saved]")
+        self.code_status_lbl.setStyleSheet("color: #34d399; font-size: 11px; font-weight: bold; margin-left: 8px;")
+        self._loading_code = False
+
+    def on_code_text_changed(self):
+        if not getattr(self, "_loading_code", False):
+            self.code_status_lbl.setText("● Modified")
+            self.code_status_lbl.setStyleSheet("color: #fbbf24; font-size: 11px; font-weight: bold; margin-left: 8px;")
+
+    def save_current_code(self):
+        if not getattr(self, "selected_scenario_id", None):
+            return
+        code = self.code_edit.toPlainText()
+        try:
+            ast.parse(code)
+        except Exception as e:
+            self.code_status_lbl.setText("Syntax Error")
+            self.code_status_lbl.setStyleSheet("color: #f87171; font-size: 11px; font-weight: bold; margin-left: 8px;")
+            self.append_log("ERROR", f"Syntax error in code: {e}")
+            return
+
+        sc = self.catalog.get_scenario(self.selected_scenario_id)
+        if not sc:
+            return
+        sc["code"] = code
+        try:
+            parsed = self.ast_engine.reverse_parse_test_file(code)
+            if parsed.get("steps"):
+                sc["steps"] = parsed["steps"]
+        except Exception:
+            pass
+
+        self.catalog.add_or_update_scenario(sc)
+        self.code_status_lbl.setText("[Saved]")
+        self.code_status_lbl.setStyleSheet("color: #34d399; font-size: 11px; font-weight: bold; margin-left: 8px;")
+        self.append_log("SUCCESS", f"Saved code for '{sc.get('name')}' to disk and synchronized steps.")
+        cur_id = self.selected_scenario_id
+        self.select_scenario(cur_id)
+
+    def run_current_flow(self):
+        if not getattr(self, "selected_scenario_id", None):
+            return
+        self.save_current_code()
+        self.run_single_test(self.selected_scenario_id)
 
     def on_code_toggle(self, state):
         show = state == Qt.Checked.value or state is True or state == 2

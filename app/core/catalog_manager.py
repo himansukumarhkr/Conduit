@@ -63,6 +63,14 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
+
+@pytest.fixture
+def test_data():
+    from app.core.test_data_manager import TestDataManager
+    workspace = os.environ.get("CONDUIT_WORKSPACE", os.getcwd())
+    env = os.environ.get("CONDUIT_ENV", "QA")
+    mgr = TestDataManager(workspace)
+    return mgr.get_environment_data(env)
 """
             with open(conftest_path, "w", encoding="utf-8") as f:
                 f.write(conftest_code)

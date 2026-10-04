@@ -10,6 +10,7 @@ modules = [
     "app/core/runner.py",
     "app/core/catalog_manager.py",
     "app/core/evidence_manager.py",
+    "app/core/test_data_manager.py",
     "app/ui/main_window.py"
 ]
 
