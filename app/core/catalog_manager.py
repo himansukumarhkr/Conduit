@@ -24,6 +24,48 @@ class CatalogManager:
             if not os.path.exists(init_file):
                 with open(init_file, "w", encoding="utf-8") as f:
                     f.write('pass\n')
+        conftest_path = os.path.join(self.workspace_dir, "conftest.py")
+        if not os.path.exists(conftest_path):
+            conftest_code = """import os
+import pytest
+from app.core.evidence_manager import EvidenceCollector
+
+@pytest.fixture(autouse=True)
+def conduit_step_evidence(page, request):
+    enabled = os.environ.get("CONDUIT_CAPTURE_EVIDENCE", "0") == "1"
+    if not enabled:
+        yield
+        return
+
+    workspace = os.environ.get("CONDUIT_WORKSPACE", os.getcwd())
+    scenario_name = request.node.name
+    format_mode = os.environ.get("CONDUIT_EVIDENCE_FORMAT", "both")
+    env = os.environ.get("CONDUIT_ENV", "QA")
+    browser = os.environ.get("CONDUIT_BROWSER", "msedge")
+
+    collector = EvidenceCollector(
+        workspace_dir=workspace,
+        scenario_name=scenario_name,
+        format_mode=format_mode,
+        env=env,
+        browser=browser
+    )
+    collector.attach(page)
+
+    yield
+
+    rep_call = getattr(request.node, "rep_call", None)
+    passed = rep_call.passed if rep_call else True
+    collector.finalize(test_passed=passed)
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    rep = outcome.get_result()
+    setattr(item, f"rep_{rep.when}", rep)
+"""
+            with open(conftest_path, "w", encoding="utf-8") as f:
+                f.write(conftest_code)
 
     def load_catalog(self):
         target_file = self.catalog_file

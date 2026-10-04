@@ -19,6 +19,8 @@ class TestRunner:
         browser: str = "msedge",
         headless: bool = True,
         env: str = "QA",
+        capture_evidence: bool = True,
+        evidence_format: str = "both",
         on_log: Optional[Callable[[str, str], None]] = None,
         on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
         on_finished: Optional[Callable[[Dict[str, Any]], None]] = None
@@ -34,9 +36,11 @@ class TestRunner:
             total_tests = len(test_file_paths)
             passed_count = 0
             failed_count = 0
+            evidence_dirs = []
+            evidence_reports = []
 
             if on_log:
-                on_log("INFO", f"Starting execution of {total_tests} scenario(s) on [{browser}] [Env: {env}] [Headless: {headless}]...")
+                on_log("INFO", f"Starting execution of {total_tests} scenario(s) on [{browser}] [Env: {env}] [Headless: {headless}] [Evidence: {'ON (' + evidence_format + ')' if capture_evidence else 'OFF'}]...")
 
             if on_progress:
                 on_progress({
@@ -78,6 +82,10 @@ class TestRunner:
                 env_vars["CONDUIT_ENV"] = env
                 env_vars["TESTFLOW_ENV"] = env
                 env_vars["PYTHONPATH"] = self.workspace_dir
+                env_vars["CONDUIT_WORKSPACE"] = self.workspace_dir
+                env_vars["CONDUIT_BROWSER"] = browser
+                env_vars["CONDUIT_CAPTURE_EVIDENCE"] = "1" if capture_evidence else "0"
+                env_vars["CONDUIT_EVIDENCE_FORMAT"] = evidence_format
 
                 try:
                     self._current_process = subprocess.Popen(
@@ -95,6 +103,19 @@ class TestRunner:
                             cleaned = line.rstrip()
                             if not cleaned:
                                 continue
+                            if "[CONDUIT_EVIDENCE]:" in cleaned:
+                                ev_dir = cleaned.split("[CONDUIT_EVIDENCE]:")[-1].strip()
+                                evidence_dirs.append(ev_dir)
+                                if on_log:
+                                    on_log("SUCCESS", f"Step Evidence Folder: {ev_dir}")
+                                continue
+                            if "[CONDUIT_DOCX]:" in cleaned:
+                                docx_file = cleaned.split("[CONDUIT_DOCX]:")[-1].strip()
+                                evidence_reports.append(docx_file)
+                                if on_log:
+                                    on_log("SUCCESS", f"Word Evidence Report: {docx_file}")
+                                continue
+
                             log_type = "INFO"
                             if "FAILED" in cleaned or "ERROR" in cleaned:
                                 log_type = "ERROR"
@@ -141,7 +162,9 @@ class TestRunner:
                     "passed": passed_count,
                     "failed": failed_count,
                     "duration": duration,
-                    "status": "Passed" if failed_count == 0 else "Failed"
+                    "status": "Passed" if failed_count == 0 else "Failed",
+                    "evidence_dirs": evidence_dirs,
+                    "evidence_reports": evidence_reports
                 })
 
         t = threading.Thread(target=_worker, daemon=True)

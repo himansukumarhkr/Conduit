@@ -408,6 +408,26 @@ class SettingsDialog(QDialog):
         self.traces_chk.setChecked(self.settings_data.get("record_traces", True))
         layout.addWidget(self.traces_chk)
 
+        self.evidence_chk = QCheckBox("Capture Screenshots at every step (QA Evidence)")
+        self.evidence_chk.setChecked(self.settings_data.get("capture_evidence", True))
+        layout.addWidget(self.evidence_chk)
+
+        layout.addWidget(QLabel("Evidence Output Format"))
+        self.format_combo = QComboBox()
+        self.format_combo.addItems([
+            "Both (Folder of PNGs & Word Document)",
+            "Word Document (.docx) Only",
+            "Folder of PNGs Only"
+        ])
+        cur_fmt = self.settings_data.get("evidence_format", "both")
+        if cur_fmt == "word":
+            self.format_combo.setCurrentIndex(1)
+        elif cur_fmt == "folder":
+            self.format_combo.setCurrentIndex(2)
+        else:
+            self.format_combo.setCurrentIndex(0)
+        layout.addWidget(self.format_combo)
+
         layout.addStretch()
 
         btn_box = QHBoxLayout()
@@ -437,6 +457,10 @@ class SettingsDialog(QDialog):
             self.settings_data["timeout"] = 5000
         self.settings_data["headless"] = self.headless_chk.isChecked()
         self.settings_data["record_traces"] = self.traces_chk.isChecked()
+        self.settings_data["capture_evidence"] = self.evidence_chk.isChecked()
+        f_idx = self.format_combo.currentIndex()
+        fmt_val = "both" if f_idx == 0 else ("word" if f_idx == 1 else "folder")
+        self.settings_data["evidence_format"] = fmt_val
         self.accept()
 
     def get_settings(self) -> dict:
@@ -636,13 +660,18 @@ class ConduitMainWindow(QMainWindow):
         self.recorder = None
         self._current_recording_meta = {}
 
+        self.last_evidence_dir = ""
+        self.last_docx_report = ""
+
         self.settings = {
             "browser": "msedge",
             "base_url": "https://demo.playwright.dev/todomvc/",
             "env": "QA",
             "timeout": 5000,
             "headless": True,
-            "record_traces": True
+            "record_traces": True,
+            "capture_evidence": True,
+            "evidence_format": "both"
         }
 
         self.current_env = "QA"
@@ -937,6 +966,22 @@ class ConduitMainWindow(QMainWindow):
         run_btn.clicked.connect(self.on_run_selected)
         layout.addWidget(run_btn)
 
+        self.btn_evidence = QPushButton("📸 Evidence: ON")
+        self.btn_evidence.setCursor(Qt.PointingHandCursor)
+        self.btn_evidence.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(16, 185, 129, 0.15);
+                border: 1px solid #10b981;
+                color: #34d399;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 6px 12px;
+                border-radius: 6px;
+            }
+        """)
+        self.btn_evidence.clicked.connect(self.toggle_evidence)
+        layout.addWidget(self.btn_evidence)
+
         browser_box = QFrame()
         browser_box.setStyleSheet("background-color: #131b2e; border: 1px solid #1e293b; border-radius: 8px; padding: 4px;")
         b_layout = QHBoxLayout(browser_box)
@@ -1025,6 +1070,47 @@ class ConduitMainWindow(QMainWindow):
         self.headless_btn.setText(f"Headless: {state_str}")
         self.headless_btn.setStyleSheet(f"background-color: transparent; color: {color}; font-size: 11px; padding: 4px 6px; border: 1px solid #334155; border-radius: 4px;")
         self.append_log("INFO", f"Headless mode toggled {state_str}")
+
+    def toggle_evidence(self):
+        cur = self.settings.get("capture_evidence", True)
+        self.settings["capture_evidence"] = not cur
+        if self.settings["capture_evidence"]:
+            fmt = self.settings.get("evidence_format", "both")
+            self.btn_evidence.setText("📸 Evidence: ON")
+            self.btn_evidence.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(16, 185, 129, 0.15);
+                    border: 1px solid #10b981;
+                    color: #34d399;
+                    font-weight: bold;
+                    font-size: 11px;
+                    padding: 6px 12px;
+                    border-radius: 6px;
+                }
+            """)
+            self.append_log("INFO", f"Step Evidence capture ON (Format: {fmt})")
+        else:
+            self.btn_evidence.setText("📸 Evidence: OFF")
+            self.btn_evidence.setStyleSheet("""
+                QPushButton {
+                    background-color: #131b2e;
+                    border: 1px solid #334155;
+                    color: #94a3b8;
+                    font-weight: bold;
+                    font-size: 11px;
+                    padding: 6px 12px;
+                    border-radius: 6px;
+                }
+            """)
+            self.append_log("INFO", "Step Evidence capture OFF")
+
+    def open_last_evidence_dir(self):
+        target = getattr(self, "last_evidence_dir", None) or os.path.join(self.workspace_dir, "evidence")
+        if os.path.exists(target):
+            try:
+                os.startfile(target)
+            except Exception:
+                pass
 
     def build_table_container(self):
         container = QWidget()
@@ -1219,6 +1305,28 @@ class ConduitMainWindow(QMainWindow):
         self.status_lbl.setStyleSheet("font-size: 11px; color: #94a3b8;")
         status_box.addWidget(self.status_lbl)
         status_box.addStretch()
+
+        self.btn_open_evidence = QPushButton("📁 Open Evidence Folder")
+        self.btn_open_evidence.setCursor(Qt.PointingHandCursor)
+        self.btn_open_evidence.setVisible(False)
+        self.btn_open_evidence.setStyleSheet("""
+            QPushButton {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #38bdf8;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 2px 10px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1e293b;
+                border-color: #38bdf8;
+                color: #ffffff;
+            }
+        """)
+        self.btn_open_evidence.clicked.connect(self.open_last_evidence_dir)
+        status_box.addWidget(self.btn_open_evidence)
         layout.addLayout(status_box)
 
         self.pbar = QProgressBar()
@@ -1398,6 +1506,15 @@ class ConduitMainWindow(QMainWindow):
         status = result.get("status", "Passed")
         dur = f"{result.get('duration', 0)}s"
         self.load_scenarios()
+        ev_dirs = result.get("evidence_dirs", [])
+        reports = result.get("evidence_reports", [])
+        if ev_dirs:
+            self.last_evidence_dir = ev_dirs[-1]
+            self.btn_open_evidence.setVisible(True)
+            self.append_log("SUCCESS", f"Step Evidence recorded: {self.last_evidence_dir}")
+        if reports:
+            self.last_docx_report = reports[-1]
+            self.append_log("SUCCESS", f"Word Evidence Report created: {self.last_docx_report}")
 
     def on_run_selected(self):
         selected_ids = []
@@ -1445,11 +1562,16 @@ class ConduitMainWindow(QMainWindow):
                 self.catalog.update_execution_result(s_id, res.get("status", "Passed"), f"{res.get('duration', 0)}s")
             self.bridge.finished_signal.emit(res)
 
+        capture_ev = self.settings.get("capture_evidence", True)
+        ev_fmt = self.settings.get("evidence_format", "both")
+
         self.runner.run_tests_async(
             test_file_paths=test_files,
             browser=self.selected_browser,
             headless=self.headless,
             env=self.current_env,
+            capture_evidence=capture_ev,
+            evidence_format=ev_fmt,
             on_log=_on_log,
             on_progress=_on_prog,
             on_finished=_on_fin

@@ -9,6 +9,7 @@ modules = [
     "app/core/recorder.py",
     "app/core/runner.py",
     "app/core/catalog_manager.py",
+    "app/core/evidence_manager.py",
     "app/ui/main_window.py"
 ]
 
