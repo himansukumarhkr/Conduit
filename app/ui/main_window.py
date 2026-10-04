@@ -1,6 +1,7 @@
 import os
 import sys
 import re
+import time
 from typing import List, Dict, Any
 
 from PySide6.QtCore import (
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QStyledItemDelegate, QPlainTextEdit, QScrollArea, QFrame, QDialog,
-    QLineEdit, QCheckBox, QProgressBar, QSplitter, QSizePolicy
+    QLineEdit, QCheckBox, QProgressBar, QSplitter, QSizePolicy, QComboBox, QStyle
 )
 
 from app.core.catalog_manager import CatalogManager
@@ -117,10 +118,20 @@ class TablePillDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
 
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, QColor("#1e293b"))
+        elif option.state & QStyle.State_MouseOver:
+            painter.fillRect(option.rect, QColor("#0d1527"))
+        else:
+            painter.fillRect(option.rect, QColor("#080c14"))
+
+        bottom_line = QRectF(option.rect.x(), option.rect.bottom(), option.rect.width(), 1)
+        painter.fillRect(bottom_line, QColor("#141c2e"))
+
         if col == 2:
             tags_text = index.data() or ""
             tags = [t.strip() for t in tags_text.split() if t.strip()]
-            x = option.rect.x() + 4
+            x = option.rect.x() + 6
             y = option.rect.y() + (option.rect.height() - 22) // 2
             font = QFont("-apple-system", 8, QFont.Bold)
             painter.setFont(font)
@@ -128,16 +139,16 @@ class TablePillDelegate(QStyledItemDelegate):
             for tag in tags:
                 clean = tag.replace("@", "")
                 if clean == "smoke":
-                    bg = QColor(37, 99, 235, 45)
-                    border = QColor(59, 130, 246, 120)
+                    bg = QColor(37, 99, 235, 50)
+                    border = QColor(59, 130, 246, 150)
                     fg = QColor("#60a5fa")
                 elif clean == "failed":
-                    bg = QColor(239, 68, 68, 45)
-                    border = QColor(239, 68, 68, 120)
+                    bg = QColor(239, 68, 68, 50)
+                    border = QColor(239, 68, 68, 150)
                     fg = QColor("#f87171")
                 else:
-                    bg = QColor(217, 119, 6, 45)
-                    border = QColor(245, 158, 11, 120)
+                    bg = QColor(217, 119, 6, 50)
+                    border = QColor(245, 158, 11, 150)
                     fg = QColor("#fbbf24")
 
                 metrics = painter.fontMetrics()
@@ -159,8 +170,8 @@ class TablePillDelegate(QStyledItemDelegate):
         elif col == 4:
             status = index.data() or ""
             is_passed = status == "Passed"
-            bg = QColor(16, 185, 129, 35) if is_passed else QColor(239, 68, 68, 45)
-            border = QColor(16, 185, 129, 90) if is_passed else QColor(239, 68, 68, 110)
+            bg = QColor(16, 185, 129, 45) if is_passed else QColor(239, 68, 68, 55)
+            border = QColor(16, 185, 129, 120) if is_passed else QColor(239, 68, 68, 140)
             fg = QColor("#34d399") if is_passed else QColor("#f87171")
 
             font = QFont("-apple-system", 8, QFont.Bold)
@@ -168,7 +179,7 @@ class TablePillDelegate(QStyledItemDelegate):
             metrics = painter.fontMetrics()
             w = metrics.horizontalAdvance(status) + 18
             h = 22
-            x = option.rect.x() + 4
+            x = option.rect.x() + 6
             y = option.rect.y() + (option.rect.height() - h) // 2
             rect = QRectF(x, y, w, h)
 
@@ -189,13 +200,15 @@ class ExecutionBridge(QObject):
     log_signal = Signal(str, str)
     progress_signal = Signal(dict)
     finished_signal = Signal(dict)
+    recording_finished_signal = Signal(list)
+    action_recorded_signal = Signal(dict)
 
 
 class RecordDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Record New Browser Journey")
-        self.setFixedSize(450, 320)
+        self.setFixedSize(460, 330)
         self.setStyleSheet("""
             QDialog {
                 background-color: #0d1527;
@@ -214,6 +227,8 @@ class RecordDialog(QDialog):
                 padding: 8px 12px;
                 color: #ffffff;
                 font-size: 13px;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
             }
             QLineEdit:focus {
                 border-color: #38bdf8;
@@ -226,6 +241,9 @@ class RecordDialog(QDialog):
                 padding: 10px 20px;
                 font-size: 13px;
                 border: none;
+            }
+            QPushButton#btnRecord:hover {
+                background: #0369a1;
             }
             QPushButton#btnCancel {
                 background-color: #131b2e;
@@ -261,11 +279,13 @@ class RecordDialog(QDialog):
         btn_box.addStretch()
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("btnCancel")
+        cancel_btn.setCursor(Qt.PointingHandCursor)
         cancel_btn.clicked.connect(self.reject)
         btn_box.addWidget(cancel_btn)
 
         record_btn = QPushButton("Start Recording")
         record_btn.setObjectName("btnRecord")
+        record_btn.setCursor(Qt.PointingHandCursor)
         record_btn.clicked.connect(self.accept)
         btn_box.addWidget(record_btn)
         layout.addLayout(btn_box)
@@ -275,6 +295,335 @@ class RecordDialog(QDialog):
         url = self.url_edit.text().strip() or "https://demo.playwright.dev/todomvc/"
         tags = [t.strip() for t in self.tags_edit.text().split(",") if t.strip()]
         return name, url, tags
+
+
+class SettingsDialog(QDialog):
+    def __init__(self, current_settings: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Conduit Settings")
+        self.setFixedSize(490, 460)
+        self.settings_data = dict(current_settings)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0d1527;
+                border: 1px solid #2a3a5e;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #94a3b8;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QLineEdit, QComboBox {
+                background-color: #070b13;
+                border: 1px solid #243048;
+                border-radius: 6px;
+                padding: 8px 12px;
+                color: #ffffff;
+                font-size: 13px;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border-color: #38bdf8;
+            }
+            QCheckBox {
+                color: #f1f5f9;
+                font-size: 13px;
+                font-weight: 500;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border: 1px solid #334155;
+                background-color: #0b1120;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #2563eb;
+                border-color: #3b82f6;
+            }
+            QPushButton#btnSave {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
+                color: white;
+                font-weight: bold;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-size: 13px;
+                border: none;
+            }
+            QPushButton#btnSave:hover {
+                background: #0369a1;
+            }
+            QPushButton#btnCancel {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #93c5fd;
+                border-radius: 8px;
+                padding: 10px 18px;
+                font-size: 13px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(14)
+
+        title = QLabel("Framework & Execution Settings")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        layout.addWidget(title)
+
+        layout.addWidget(QLabel("Default Browser Channel"))
+        self.browser_combo = QComboBox()
+        self.browser_combo.addItems(["Microsoft Edge (msedge)", "Google Chrome (chrome)", "Chromium (bundled)"])
+        cur_b = self.settings_data.get("browser", "msedge")
+        if cur_b == "chrome":
+            self.browser_combo.setCurrentIndex(1)
+        elif cur_b == "chromium":
+            self.browser_combo.setCurrentIndex(2)
+        else:
+            self.browser_combo.setCurrentIndex(0)
+        layout.addWidget(self.browser_combo)
+
+        layout.addWidget(QLabel("Default Base URL"))
+        self.url_edit = QLineEdit(self.settings_data.get("base_url", "https://demo.playwright.dev/todomvc/"))
+        layout.addWidget(self.url_edit)
+
+        layout.addWidget(QLabel("Default Environment Target"))
+        self.env_combo = QComboBox()
+        self.env_combo.addItems(["QA", "Staging", "Prod"])
+        self.env_combo.setCurrentText(self.settings_data.get("env", "QA"))
+        layout.addWidget(self.env_combo)
+
+        layout.addWidget(QLabel("Assertion Timeout (ms)"))
+        self.timeout_edit = QLineEdit(str(self.settings_data.get("timeout", 5000)))
+        layout.addWidget(self.timeout_edit)
+
+        self.headless_chk = QCheckBox("Run tests in Headless mode by default")
+        self.headless_chk.setChecked(self.settings_data.get("headless", True))
+        layout.addWidget(self.headless_chk)
+
+        self.traces_chk = QCheckBox("Capture Playwright Traces on Failure")
+        self.traces_chk.setChecked(self.settings_data.get("record_traces", True))
+        layout.addWidget(self.traces_chk)
+
+        layout.addStretch()
+
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("btnCancel")
+        cancel_btn.setCursor(Qt.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        btn_box.addWidget(cancel_btn)
+
+        save_btn = QPushButton("Save Settings")
+        save_btn.setObjectName("btnSave")
+        save_btn.setCursor(Qt.PointingHandCursor)
+        save_btn.clicked.connect(self.on_save)
+        btn_box.addWidget(save_btn)
+        layout.addLayout(btn_box)
+
+    def on_save(self):
+        b_idx = self.browser_combo.currentIndex()
+        browser_val = "msedge" if b_idx == 0 else ("chrome" if b_idx == 1 else "chromium")
+        self.settings_data["browser"] = browser_val
+        self.settings_data["base_url"] = self.url_edit.text().strip()
+        self.settings_data["env"] = self.env_combo.currentText()
+        try:
+            self.settings_data["timeout"] = int(self.timeout_edit.text().strip())
+        except ValueError:
+            self.settings_data["timeout"] = 5000
+        self.settings_data["headless"] = self.headless_chk.isChecked()
+        self.settings_data["record_traces"] = self.traces_chk.isChecked()
+        self.accept()
+
+    def get_settings(self) -> dict:
+        return self.settings_data
+
+
+class SuitesDialog(QDialog):
+    def __init__(self, catalog: CatalogManager, on_run_suite=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Test Suites & Tags")
+        self.setFixedSize(480, 400)
+        self.catalog = catalog
+        self.on_run_suite = on_run_suite
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0d1527;
+                border: 1px solid #2a3a5e;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #e2e8f0;
+            }
+            QPushButton#btnClose {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #93c5fd;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: 12px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Suites & Tags Overview")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        layout.addWidget(title)
+
+        tag_counts = {}
+        for sc in self.catalog.get_all_scenarios():
+            for t in sc.get("tags", []):
+                tag_counts[t] = tag_counts.get(t, 0) + 1
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        container = QWidget()
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(8)
+
+        for tag, count in tag_counts.items():
+            row = QFrame()
+            row.setStyleSheet("background-color: #131b2e; border: 1px solid #1e293b; border-radius: 8px; padding: 6px;")
+            r_box = QHBoxLayout(row)
+            r_box.setContentsMargins(10, 6, 10, 6)
+
+            t_lbl = QLabel(tag)
+            t_lbl.setStyleSheet("color: #60a5fa; font-weight: bold; font-size: 13px;")
+            r_box.addWidget(t_lbl)
+
+            c_lbl = QLabel(f"{count} scenario{'s' if count != 1 else ''}")
+            c_lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+            r_box.addWidget(c_lbl)
+
+            r_box.addStretch()
+
+            run_btn = QPushButton("Run Suite")
+            run_btn.setCursor(Qt.PointingHandCursor)
+            run_btn.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
+                    color: white;
+                    font-size: 11px;
+                    font-weight: bold;
+                    border-radius: 6px;
+                    padding: 4px 10px;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background: #0369a1;
+                }
+            """)
+            run_btn.clicked.connect(lambda _, t=tag: self._run_tag(t))
+            r_box.addWidget(run_btn)
+
+            c_layout.addWidget(row)
+
+        c_layout.addStretch()
+        scroll.setWidget(container)
+        layout.addWidget(scroll, 1)
+
+        b_box = QHBoxLayout()
+        b_box.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.setObjectName("btnClose")
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.clicked.connect(self.accept)
+        b_box.addWidget(close_btn)
+        layout.addLayout(b_box)
+
+    def _run_tag(self, tag):
+        self.accept()
+        if self.on_run_suite:
+            self.on_run_suite(tag)
+
+
+class HistoryDialog(QDialog):
+    def __init__(self, catalog: CatalogManager, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Execution History")
+        self.setFixedSize(520, 420)
+        self.catalog = catalog
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0d1527;
+                border: 1px solid #2a3a5e;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #e2e8f0;
+            }
+            QPushButton#btnClose {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #93c5fd;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: 12px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Execution History & Runs")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        layout.addWidget(title)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        container = QWidget()
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(8)
+
+        for sc in self.catalog.get_all_scenarios():
+            row = QFrame()
+            row.setStyleSheet("background-color: #131b2e; border: 1px solid #1e293b; border-radius: 8px;")
+            r_box = QHBoxLayout(row)
+            r_box.setContentsMargins(12, 8, 12, 8)
+
+            n_lbl = QLabel(sc.get("name", "Scenario"))
+            n_lbl.setStyleSheet("color: #f8fafc; font-weight: bold; font-size: 12px;")
+            r_box.addWidget(n_lbl)
+
+            r_box.addStretch()
+
+            status = sc.get("status", "Passed")
+            dur = sc.get("duration", "--")
+            time_lbl = QLabel(f"{sc.get('last_execution', 'Unknown')} ({dur})")
+            time_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+            r_box.addWidget(time_lbl)
+
+            s_lbl = QLabel(status)
+            color = "#34d399" if status == "Passed" else "#f87171"
+            s_lbl.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 11px; padding: 2px 6px; border: 1px solid {color}; border-radius: 4px;")
+            r_box.addWidget(s_lbl)
+
+            c_layout.addWidget(row)
+
+        c_layout.addStretch()
+        scroll.setWidget(container)
+        layout.addWidget(scroll, 1)
+
+        b_box = QHBoxLayout()
+        b_box.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.setObjectName("btnClose")
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.clicked.connect(self.accept)
+        b_box.addWidget(close_btn)
+        layout.addLayout(b_box)
 
 
 class ConduitMainWindow(QMainWindow):
@@ -287,6 +636,15 @@ class ConduitMainWindow(QMainWindow):
         self.recorder = None
         self._current_recording_meta = {}
 
+        self.settings = {
+            "browser": "msedge",
+            "base_url": "https://demo.playwright.dev/todomvc/",
+            "env": "QA",
+            "timeout": 5000,
+            "headless": True,
+            "record_traces": True
+        }
+
         self.current_env = "QA"
         self.selected_browser = "msedge"
         self.headless = True
@@ -296,6 +654,8 @@ class ConduitMainWindow(QMainWindow):
         self.bridge.log_signal.connect(self.append_log)
         self.bridge.progress_signal.connect(self.update_progress)
         self.bridge.finished_signal.connect(self.on_execution_finished)
+        self.bridge.recording_finished_signal.connect(self.on_recording_completed)
+        self.bridge.action_recorded_signal.connect(self.on_action_recorded)
 
         self.init_ui()
         self.load_scenarios()
@@ -313,16 +673,27 @@ class ConduitMainWindow(QMainWindow):
                 color: #f8fafc;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
+            QPlainTextEdit, QTextEdit, QLineEdit, QComboBox {
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+            }
             QTableWidget {
                 background-color: #080c14;
                 border: none;
                 gridline-color: transparent;
-                selection-background-color: rgba(37, 99, 235, 0.15);
-                selection-color: #ffffff;
+                outline: none;
             }
             QTableWidget::item {
                 padding: 10px 8px;
                 border-bottom: 1px solid #141c2e;
+                color: #f8fafc;
+            }
+            QTableWidget::item:selected {
+                background-color: #1e293b;
+                color: #ffffff;
+            }
+            QTableWidget::item:hover {
+                background-color: #0d1527;
             }
             QHeaderView::section {
                 background-color: #080c14;
@@ -407,10 +778,10 @@ class ConduitMainWindow(QMainWindow):
         """)
         layout.addWidget(logo)
 
-        self.nav_catalog_btn = self._make_sidebar_btn("Catalog", active=True)
+        self.nav_catalog_btn = self._make_sidebar_btn("Catalog", active=True, clicked=self.show_catalog_view)
         self.nav_record_btn = self._make_sidebar_btn("Record", clicked=self.on_record_clicked)
-        self.nav_suites_btn = self._make_sidebar_btn("Suites")
-        self.nav_history_btn = self._make_sidebar_btn("History")
+        self.nav_suites_btn = self._make_sidebar_btn("Suites", clicked=self.open_suites_dialog)
+        self.nav_history_btn = self._make_sidebar_btn("History", clicked=self.open_history_dialog)
 
         layout.addWidget(self.nav_catalog_btn)
         layout.addWidget(self.nav_record_btn)
@@ -419,7 +790,7 @@ class ConduitMainWindow(QMainWindow):
 
         layout.addStretch()
 
-        settings_btn = self._make_sidebar_btn("Settings")
+        settings_btn = self._make_sidebar_btn("Settings", clicked=self.open_settings)
         layout.addWidget(settings_btn)
 
         return sidebar
@@ -458,6 +829,49 @@ class ConduitMainWindow(QMainWindow):
             btn.clicked.connect(clicked)
         return btn
 
+    def show_catalog_view(self):
+        self.nav_catalog_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(56, 189, 248, 0.12);
+                border: 1px solid rgba(56, 189, 248, 0.3);
+                border-radius: 8px;
+                color: #38bdf8;
+                font-size: 10px;
+                font-weight: bold;
+            }
+        """)
+        self.load_scenarios()
+
+    def open_settings(self):
+        dlg = SettingsDialog(self.settings, self)
+        if dlg.exec() == QDialog.Accepted:
+            self.settings = dlg.get_settings()
+            self.set_environment(self.settings.get("env", "QA"))
+            self.set_browser(self.settings.get("browser", "msedge"))
+            new_hl = self.settings.get("headless", True)
+            if self.headless != new_hl:
+                self.toggle_headless()
+            self.append_log("SUCCESS", "Conduit framework settings updated successfully.")
+
+    def open_suites_dialog(self):
+        dlg = SuitesDialog(self.catalog, on_run_suite=self.run_suite_by_tag, parent=self)
+        dlg.exec()
+
+    def open_history_dialog(self):
+        dlg = HistoryDialog(self.catalog, parent=self)
+        dlg.exec()
+
+    def run_suite_by_tag(self, tag: str):
+        matching_ids = [
+            sc["id"] for sc in self.catalog.get_all_scenarios()
+            if tag in sc.get("tags", [])
+        ]
+        if matching_ids:
+            self.append_log("INFO", f"Running suite [{tag}] ({len(matching_ids)} scenarios)...")
+            self.run_scenarios_by_ids(matching_ids)
+        else:
+            self.append_log("WARNING", f"No scenarios found for suite tag: {tag}")
+
     def build_top_bar(self):
         bar = QFrame()
         bar.setFixedHeight(64)
@@ -483,9 +897,9 @@ class ConduitMainWindow(QMainWindow):
 
         layout.addStretch()
 
-        record_btn = QPushButton("● Record New Flow")
-        record_btn.setCursor(Qt.PointingHandCursor)
-        record_btn.setStyleSheet("""
+        self.btn_record_flow = QPushButton("● Record New Flow")
+        self.btn_record_flow.setCursor(Qt.PointingHandCursor)
+        self.btn_record_flow.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
                 color: #ffffff;
@@ -499,8 +913,8 @@ class ConduitMainWindow(QMainWindow):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0369a1, stop:1 #1d4ed8);
             }
         """)
-        record_btn.clicked.connect(self.on_record_clicked)
-        layout.addWidget(record_btn)
+        self.btn_record_flow.clicked.connect(self.on_record_clicked)
+        layout.addWidget(self.btn_record_flow)
 
         run_btn = QPushButton("▶ Run Selected")
         run_btn.setCursor(Qt.PointingHandCursor)
@@ -602,56 +1016,84 @@ class ConduitMainWindow(QMainWindow):
         else:
             self.btn_chrome.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-weight: bold; border-radius: 4px; padding: 4px 8px; border: none;")
             self.btn_edge.setStyleSheet("background-color: transparent; color: #64748b; font-weight: bold; border-radius: 4px; padding: 4px 8px; border: none;")
-        self.append_log("INFO", f"Selected target browser: [{b_name}]")
+        self.append_log("INFO", f"Browser channel set to [{b_name}]")
 
     def toggle_headless(self):
         self.headless = not self.headless
         state_str = "ON" if self.headless else "OFF"
+        color = "#94a3b8" if self.headless else "#38bdf8"
         self.headless_btn.setText(f"Headless: {state_str}")
-        self.append_log("INFO", f"Headless execution mode: {state_str}")
+        self.headless_btn.setStyleSheet(f"background-color: transparent; color: {color}; font-size: 11px; padding: 4px 6px; border: 1px solid #334155; border-radius: 4px;")
+        self.append_log("INFO", f"Headless mode toggled {state_str}")
 
     def build_table_container(self):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(0)
+        layout.setSpacing(12)
 
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels([
-            "", "Scenario Name", "Tags", "Last Execution", "Status", "Duration", "Actions"
-        ])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        filter_row = QHBoxLayout()
+        search_box = QLineEdit()
+        search_box.setPlaceholderText("Search flows, tags, pages...")
+        search_box.setStyleSheet("""
+            QLineEdit {
+                background-color: #0b1120;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #ffffff;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border-color: #38bdf8;
+            }
+        """)
+        search_box.textChanged.connect(self.filter_table)
+        filter_row.addWidget(search_box, 1)
+
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels(["", "Scenario Name", "Tags", "Last Run", "Status", "Duration", "Actions"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
-
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.Fixed)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setItemDelegate(TablePillDelegate(self.table))
 
         self.table.setColumnWidth(0, 36)
-        self.table.setColumnWidth(6, 100)
-
-        self.pill_delegate = TablePillDelegate(self.table)
-        self.table.setItemDelegateForColumn(2, self.pill_delegate)
-        self.table.setItemDelegateForColumn(4, self.pill_delegate)
+        self.table.setColumnWidth(1, 280)
+        self.table.setColumnWidth(2, 210)
+        self.table.setColumnWidth(3, 130)
+        self.table.setColumnWidth(4, 100)
+        self.table.setColumnWidth(5, 80)
+        self.table.setColumnWidth(6, 70)
 
         self.table.cellClicked.connect(self.on_table_cell_clicked)
         layout.addWidget(self.table)
 
         return container
 
+    def filter_table(self, query: str):
+        q = query.strip().lower()
+        for r in range(self.table.rowCount()):
+            name_item = self.table.item(r, 1)
+            tags_item = self.table.item(r, 2)
+            name_text = name_item.text().lower() if name_item else ""
+            tags_text = tags_item.text().lower() if tags_item else ""
+            matches = (q in name_text) or (q in tags_text)
+            self.table.setRowHidden(r, not matches)
+
     def build_inspector_panel(self):
         panel = QFrame()
-        panel.setStyleSheet("background-color: #0d1527; border-left: 1px solid #1e293b;")
+        panel.setStyleSheet("background-color: #0b101b; border-left: 1px solid #1e293b;")
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(14)
+        layout.setSpacing(12)
 
         header_layout = QHBoxLayout()
         inspector_title = QLabel("Test Inspector")
@@ -674,6 +1116,7 @@ class ConduitMainWindow(QMainWindow):
         self.steps_scroll.setWidgetResizable(True)
         self.steps_scroll.setStyleSheet("background: transparent; border: none;")
         self.steps_container_widget = QWidget()
+        self.steps_container_widget.setStyleSheet("background: transparent;")
         self.steps_container_layout = QVBoxLayout(self.steps_container_widget)
         self.steps_container_layout.setContentsMargins(0, 0, 0, 0)
         self.steps_container_layout.setSpacing(6)
@@ -744,13 +1187,23 @@ class ConduitMainWindow(QMainWindow):
 
         self.log_feed = QPlainTextEdit()
         self.log_feed.setReadOnly(True)
-        self.log_feed.setFont(QFont("Consolas", 9))
-        self.log_feed.setStyleSheet("background: transparent; border: none; color: #38bdf8;")
+        self.log_feed.setFont(QFont("Consolas", 10))
+        self.log_feed.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #070b13;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                color: #e2e8f0;
+                padding: 6px;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+            }
+        """)
         logs_layout.addWidget(self.log_feed)
 
         layout.addWidget(logs_frame)
 
-        self.append_log("INFO", "Conduit 100% Python Desktop App initialized.")
+        self.append_log("INFO", "Conduit Pure Python Desktop Engine initialized.")
         return panel
 
     def build_bottom_bar(self):
@@ -758,19 +1211,15 @@ class ConduitMainWindow(QMainWindow):
         bar.setFixedHeight(48)
         bar.setStyleSheet("background-color: #0d1527; border-top: 1px solid #1e293b;")
         layout = QVBoxLayout(bar)
-        layout.setContentsMargins(24, 6, 24, 8)
+        layout.setContentsMargins(20, 8, 20, 8)
         layout.setSpacing(4)
 
-        meta_row = QHBoxLayout()
-        title = QLabel("Execution Status")
-        title.setStyleSheet("font-size: 11px; font-weight: bold; color: #cbd5e1;")
-        meta_row.addWidget(title)
-        meta_row.addStretch()
-
-        self.status_lbl = QLabel("Idle — Ready")
-        self.status_lbl.setStyleSheet("font-size: 11px; color: #64748b;")
-        meta_row.addWidget(self.status_lbl)
-        layout.addLayout(meta_row)
+        status_box = QHBoxLayout()
+        self.status_lbl = QLabel("Ready - 7 scenario(s) loaded")
+        self.status_lbl.setStyleSheet("font-size: 11px; color: #94a3b8;")
+        status_box.addWidget(self.status_lbl)
+        status_box.addStretch()
+        layout.addLayout(status_box)
 
         self.pbar = QProgressBar()
         self.pbar.setFixedHeight(4)
@@ -783,7 +1232,7 @@ class ConduitMainWindow(QMainWindow):
                 border-radius: 2px;
             }
             QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #06b6d4, stop:1 #3b82f6);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #38bdf8, stop:1 #2563eb);
                 border-radius: 2px;
             }
         """)
@@ -793,10 +1242,11 @@ class ConduitMainWindow(QMainWindow):
 
     def load_scenarios(self):
         scenarios = self.catalog.get_all_scenarios()
-        self.table.setRowCount(0)
+        self.table.setRowCount(len(scenarios))
+        self.status_lbl.setText(f"Ready - {len(scenarios)} scenario(s) loaded")
 
         for row, sc in enumerate(scenarios):
-            self.table.insertRow(row)
+            self.table.setRowHeight(row, 44)
 
             chk_item = QTableWidgetItem()
             chk_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
@@ -805,6 +1255,7 @@ class ConduitMainWindow(QMainWindow):
 
             name_item = QTableWidgetItem(sc.get("name", ""))
             name_item.setData(Qt.UserRole, sc.get("id"))
+            name_item.setForeground(QColor("#f8fafc"))
             self.table.setItem(row, 1, name_item)
 
             tags_str = " ".join(sc.get("tags", []))
@@ -812,17 +1263,18 @@ class ConduitMainWindow(QMainWindow):
             self.table.setItem(row, 2, tags_item)
 
             exec_item = QTableWidgetItem(sc.get("last_execution", ""))
-            exec_item.setForeground(QColor("#64748b"))
+            exec_item.setForeground(QColor("#94a3b8"))
             self.table.setItem(row, 3, exec_item)
 
             status_item = QTableWidgetItem(sc.get("status", "Passed"))
             self.table.setItem(row, 4, status_item)
 
             dur_item = QTableWidgetItem(sc.get("duration", "--"))
-            dur_item.setForeground(QColor("#64748b"))
+            dur_item.setForeground(QColor("#94a3b8"))
             self.table.setItem(row, 5, dur_item)
 
             actions_widget = QWidget()
+            actions_widget.setStyleSheet("background: transparent;")
             act_layout = QHBoxLayout(actions_widget)
             act_layout.setContentsMargins(4, 2, 4, 2)
             act_layout.setSpacing(6)
@@ -866,27 +1318,42 @@ class ConduitMainWindow(QMainWindow):
 
         steps = sc.get("steps", [])
         for idx, st in enumerate(steps):
-            card = QLabel(st.get("human_description", f"{idx + 1}. Step"))
-            card.setWordWrap(True)
-            if idx == 0:
-                card.setStyleSheet("""
-                    background-color: rgba(56, 189, 248, 0.08);
-                    border: 1px solid #38bdf8;
-                    border-radius: 6px;
-                    padding: 8px 10px;
-                    color: #ffffff;
-                    font-size: 12px;
-                """)
-            else:
-                card.setStyleSheet("""
-                    background-color: rgba(15, 23, 42, 0.6);
-                    border: 1px solid rgba(51, 65, 85, 0.4);
-                    border-radius: 6px;
-                    padding: 8px 10px;
-                    color: #cbd5e1;
-                    font-size: 12px;
-                """)
-            self.steps_container_layout.addWidget(card)
+            step_card = QFrame()
+            step_card.setStyleSheet("""
+                QFrame {
+                    background-color: #0b1120;
+                    border: 1px solid #1e293b;
+                    border-radius: 8px;
+                }
+                QFrame:hover {
+                    border-color: #38bdf8;
+                    background-color: #0f182c;
+                }
+            """)
+            card_layout = QHBoxLayout(step_card)
+            card_layout.setContentsMargins(10, 8, 10, 8)
+            card_layout.setSpacing(10)
+
+            num_lbl = QLabel(str(idx + 1))
+            num_lbl.setFixedSize(22, 22)
+            num_lbl.setAlignment(Qt.AlignCenter)
+            num_lbl.setStyleSheet("""
+                background-color: rgba(56, 189, 248, 0.15);
+                color: #38bdf8;
+                font-size: 11px;
+                font-weight: bold;
+                border-radius: 11px;
+                border: 1px solid rgba(56, 189, 248, 0.4);
+            """)
+            card_layout.addWidget(num_lbl)
+
+            desc_text = st.get("human_description", f"Step {idx + 1}")
+            desc_lbl = QLabel(desc_text)
+            desc_lbl.setWordWrap(True)
+            desc_lbl.setStyleSheet("color: #f8fafc; font-size: 12px; font-weight: 500; background: transparent; border: none;")
+            card_layout.addWidget(desc_lbl, 1)
+
+            self.steps_container_layout.addWidget(step_card)
 
         self.steps_container_layout.addStretch()
 
@@ -909,7 +1376,16 @@ class ConduitMainWindow(QMainWindow):
             color = "#f87171"
         elif level == "SUCCESS":
             color = "#34d399"
-        self.log_feed.appendHtml(f"<span style='color:{color}; font-weight:bold;'>[{level}]</span> <span style='color:#e2e8f0;'>{msg}</span>")
+        elif level == "WARNING":
+            color = "#fbbf24"
+        timestamp = time.strftime("%H:%M:%S")
+        self.log_feed.appendHtml(
+            f"<div style='margin-bottom: 2px; line-height: 1.4;'>"
+            f"<span style='color:#64748b; font-size:11px;'>{timestamp}</span> "
+            f"<span style='color:{color}; font-weight:bold; font-size:11px;'>[{level}]</span> "
+            f"<span style='color:#f1f5f9; font-size:11px;'>{msg}</span>"
+            f"</div>"
+        )
 
     def update_progress(self, data: dict):
         pct = data.get("percentage", 0)
@@ -980,10 +1456,15 @@ class ConduitMainWindow(QMainWindow):
         )
 
     def on_record_clicked(self):
+        if self.recorder and self.recorder.is_recording:
+            self.append_log("INFO", "Stopping active recording and synthesizing Page Objects...")
+            self.status_lbl.setText("Stopping recording session...")
+            self.recorder.stop_recording()
+            return
+
         dlg = RecordDialog(self)
         if dlg.exec() == QDialog.Accepted:
             name, url, tags = dlg.get_data()
-            self.append_log("INFO", f"Launching browser recorder for '{name}' on {url}...")
             self._current_recording_meta = {
                 "name": name,
                 "url": url,
@@ -991,10 +1472,87 @@ class ConduitMainWindow(QMainWindow):
                 "browser": self.selected_browser
             }
 
-            def on_action(step_data):
-                desc = step_data.get("human_description", "")
-                self.bridge.log_signal.emit("INFO", f"Recorded step: {desc}")
+            self.btn_record_flow.setText("■ Stop & Save Recording")
+            self.btn_record_flow.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #dc2626, stop:1 #ef4444);
+                    color: #ffffff;
+                    font-weight: bold;
+                    font-size: 13px;
+                    padding: 8px 18px;
+                    border-radius: 8px;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background: #b91c1c;
+                }
+            """)
+            self.status_lbl.setText(f"● Recording '{name}' in browser... Click 'Stop & Save Recording' or close browser when done")
+            self.append_log("INFO", f"Launching browser recorder for '{name}' on {url}...")
 
-            self.recorder = BrowserRecorder(on_action_recorded=on_action)
+            def _on_action(step_data):
+                self.bridge.action_recorded_signal.emit(step_data)
+
+            def _on_finished(actions):
+                self.bridge.recording_finished_signal.emit(actions)
+
+            self.recorder = BrowserRecorder(
+                on_action_recorded=_on_action,
+                on_recording_finished=_on_finished
+            )
             self.recorder.start_recording(initial_url=url, browser_channel=self.selected_browser)
-            self.append_log("INFO", "Recording active in browser. Alt+Click to inject assertions. Close browser when finished.")
+            self.append_log("INFO", "Recording active in browser. Perform actions or Alt+Click to assert.")
+
+    def on_action_recorded(self, step_data: dict):
+        desc = step_data.get("human_description", "")
+        self.append_log("INFO", f"Recorded step: {desc}")
+
+    def on_recording_completed(self, actions: list):
+        self.btn_record_flow.setText("● Record New Flow")
+        self.btn_record_flow.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 18px;
+                border-radius: 8px;
+                border: none;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0369a1, stop:1 #1d4ed8);
+            }
+        """)
+
+        meta = self._current_recording_meta or {}
+        scenario_name = meta.get("name", "Recorded Scenario")
+        tags = meta.get("tags", ["@smoke"])
+
+        self.append_log("INFO", f"Synthesizing Page Object Model and Pytest spec for {len(actions)} recorded action(s)...")
+
+        synth_result = self.ast_engine.synthesize_pom_and_test(
+            scenario_name=scenario_name,
+            tags=tags,
+            actions=actions
+        )
+
+        new_id = f"sc_{os.urandom(4).hex()}"
+        new_scenario = {
+            "id": new_id,
+            "name": scenario_name,
+            "tags": tags,
+            "last_execution": "Recorded just now",
+            "status": "Passed",
+            "duration": "--",
+            "file_name": synth_result["file_name"],
+            "steps": synth_result["steps"],
+            "code": synth_result["test_code"],
+            "pages": synth_result["pages"]
+        }
+
+        self.catalog.add_or_update_scenario(new_scenario)
+        self.load_scenarios()
+        self.select_scenario(new_id)
+
+        self.status_lbl.setText(f"Ready - Scenario '{scenario_name}' synthesized and ready to run")
+        self.append_log("SUCCESS", f"Synthesized Page Objects and scenario '{scenario_name}' ({len(actions)} steps). Added to Test Catalog!")

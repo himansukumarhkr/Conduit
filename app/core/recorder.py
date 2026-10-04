@@ -19,10 +19,24 @@ RECORDER_INJECTED_SCRIPT = """
                 <strong style="color:#38bdf8;">Conduit Recording</strong>
             </div>
             <div style="border-left:1px solid #334155;height:18px;"></div>
-            <span style="color:#94a3b8;">Alt+Click any element to add Assertion</span>
+            <span style="color:#94a3b8;">Alt+Click to Assert</span>
+            <div style="border-left:1px solid #334155;height:18px;"></div>
+            <button id="__conduit_finish_btn__" style="background:#10b981;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:bold;cursor:pointer;">Finish & Save</button>
         </div>
     `;
     document.documentElement.appendChild(overlay);
+
+    const finishBtn = document.getElementById('__conduit_finish_btn__');
+    if (finishBtn) {
+        finishBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            (window.__conduit_record__ || window.__testflow_record__)({
+                action: 'finish',
+                timestamp: Date.now()
+            });
+        };
+    }
 
     function getElementMeta(el) {
         if (!el || el === document.body || el === document.documentElement) {
@@ -161,10 +175,16 @@ RECORDER_INJECTED_SCRIPT = """
 
 class BrowserRecorder:
 
-    def __init__(self, on_action_recorded: Optional[Callable[[Dict[str, Any]], None]] = None):
+    def __init__(
+        self,
+        on_action_recorded: Optional[Callable[[Dict[str, Any]], None]] = None,
+        on_recording_finished: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+    ):
         self.on_action_recorded = on_action_recorded
+        self.on_recording_finished = on_recording_finished
         self.recorded_actions: List[Dict[str, Any]] = []
         self._is_recording = False
+        self._finished_notified = False
         self._thread: Optional[threading.Thread] = None
         self._playwright = None
         self._browser: Optional[Browser] = None
@@ -181,6 +201,7 @@ class BrowserRecorder:
             return
 
         self.recorded_actions = []
+        self._finished_notified = False
         self._is_recording = True
 
         def _run():
@@ -227,8 +248,12 @@ class BrowserRecorder:
         self._thread.start()
 
     def _handle_raw_event(self, source, event_data: Dict[str, Any]):
+        act_type = event_data.get("action")
+        if act_type == "finish":
+            threading.Thread(target=self.stop_recording, daemon=True).start()
+            return
+
         with self._lock:
-            act_type = event_data.get("action")
             meta = event_data.get("meta", {})
             val = event_data.get("value", "")
             url = event_data.get("url", "")
@@ -269,5 +294,11 @@ class BrowserRecorder:
             self._context = None
             self._page = None
             self._playwright = None
+
+        with self._lock:
+            if self.on_recording_finished and not self._finished_notified:
+                self._finished_notified = True
+                actions_snapshot = list(self.recorded_actions)
+                self.on_recording_finished(actions_snapshot)
 
         return self.recorded_actions
