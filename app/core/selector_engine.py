@@ -129,9 +129,66 @@ class SelectorEngine:
         return candidates[0]
 
     @classmethod
+    def create_custom_selector(cls, strategy: str, selector: str, var_name: str = "") -> Dict[str, Any]:
+        s = selector.strip()
+        strat = strategy.lower()
+        if not var_name:
+            var_name = cls.clean_identifier(s)
+
+        if strat == "testid":
+            return {
+                "strategy": "testid",
+                "code": f'page.locator("[data-testid=\'{s}\']")',
+                "locator_expr": f'self.page.locator("[data-testid=\'{s}\']")',
+                "var_name": var_name,
+                "display": f"data-testid='{s}'"
+            }
+        elif strat == "text":
+            return {
+                "strategy": "text",
+                "code": f'page.get_by_text("{s}", exact=True)',
+                "locator_expr": f'self.page.get_by_text("{s}", exact=True)',
+                "var_name": var_name,
+                "display": f"text='{s}'"
+            }
+        elif strat == "id":
+            clean_id = s.lstrip("#")
+            return {
+                "strategy": "id",
+                "code": f'page.locator("#{clean_id}")',
+                "locator_expr": f'self.page.locator("#{clean_id}")',
+                "var_name": var_name,
+                "display": f"#{clean_id}"
+            }
+        elif strat == "role":
+            return {
+                "strategy": "role",
+                "code": f'page.get_by_role("{s}")',
+                "locator_expr": f'self.page.get_by_role("{s}")',
+                "var_name": var_name,
+                "display": f"role='{s}'"
+            }
+        elif strat == "xpath":
+            return {
+                "strategy": "xpath",
+                "code": f'page.locator("xpath={s}")',
+                "locator_expr": f'self.page.locator("xpath={s}")',
+                "var_name": var_name,
+                "display": f"xpath={s}"
+            }
+        else:
+            return {
+                "strategy": "css",
+                "code": f'page.locator("{s}")',
+                "locator_expr": f'self.page.locator("{s}")',
+                "var_name": var_name,
+                "display": s
+            }
+
+    @classmethod
     def generate_human_step(cls, action_type: str, selector_info: Dict[str, Any], value: str = "") -> str:
-        display = selector_info.get("display", "element")
-        var_name = selector_info.get("var_name", "element")
+        display = selector_info.get("display", "element") if selector_info else "element"
+        var_name = selector_info.get("var_name", "element") if selector_info else "element"
         friendly_target = f"'{var_name.replace('_', ' ')}'"
 
         if action_type == "navigate":
@@ -147,6 +204,16 @@ class SelectorEngine:
             return f"Assert {friendly_target} contains text '{value}'"
         elif action_type == "assert_value":
             return f"Assert {friendly_target} has value '{value}'"
+        elif action_type == "assert_title":
+            return f"Assert page title equals '{value}'"
+        elif action_type == "assert_url":
+            return f"Assert page URL matches '{value}'"
+        elif action_type == "wait":
+            return f"Wait for {value}ms"
+        elif action_type == "take_screenshot":
+            return f"Take screenshot '{value}'"
+        elif action_type == "api_request":
+            return f"API Request: {value}"
         elif action_type == "press":
             return f"Press key '{value}' on {friendly_target}"
         return f"Perform {action_type} on {friendly_target}"

@@ -55,6 +55,18 @@ class ASTNormalizer:
 
         for action in actions:
             act_type = action.get("action")
+            raw_code = action.get("code")
+            if not act_type and raw_code:
+                processed_steps.append({
+                    "human_description": action.get("human_description", ""),
+                    "code": raw_code,
+                    "action": "custom",
+                    "page_name": "MainPage",
+                    "value": "",
+                    "selector_info": {}
+                })
+                continue
+
             url = action.get("url") or current_url
             if url:
                 current_url = url
@@ -75,7 +87,8 @@ class ASTNormalizer:
             locator_expr = sel.get("locator_expr", "self.page.locator('body')")
             val = action.get("value", "")
 
-            if var_name not in page_data["locators"] and act_type != "navigate":
+            non_locator_actions = ["navigate", "wait", "take_screenshot", "assert_title", "assert_url", "api_request"]
+            if var_name not in page_data["locators"] and act_type not in non_locator_actions:
                 page_data["locators"][var_name] = {
                     "var_name": var_name,
                     "playwright_code": locator_expr
@@ -155,6 +168,23 @@ class ASTNormalizer:
         if act_type == "navigate":
             return f'page.goto("{val}")', None
 
+        elif act_type == "wait":
+            ms_val = int(val) if str(val).isdigit() else 1000
+            return f'page.wait_for_timeout({ms_val})', None
+
+        elif act_type == "take_screenshot":
+            path_val = val or "evidence_screenshot.png"
+            return f'page.screenshot(path="{path_val}")', None
+
+        elif act_type == "assert_title":
+            return f'expect(page).to_have_title("{val}")', None
+
+        elif act_type == "assert_url":
+            return f'expect(page).to_have_url("{val}")', None
+
+        elif act_type == "api_request":
+            return f'page.request.get("{val}")', None
+
         elif act_type == "click":
             method_name = f"click_{var_name}"
             method = {
@@ -207,6 +237,9 @@ class ASTNormalizer:
                 "docstring": "",
                 "body_lines": [f"expect(self.{var_name}).to_have_value(expected_val)"]
             }
+            step_code = f'{page_var}.{method_name}("{val}")'
+            return step_code, method
+
         elif act_type == "press":
             method_name = f"press_{var_name}"
             method = {
@@ -228,6 +261,13 @@ class ASTNormalizer:
         s = re.sub(r'[^a-zA-Z0-9_]', '', s)
         s = re.sub(r'_+', '_', s).strip('_').lower()
         return s or "test"
+
+    def reconstruct_scenario(self, scenario: Dict[str, Any]) -> Dict[str, Any]:
+        return self.synthesize_pom_and_test(
+            scenario_name=scenario.get("name", "Scenario"),
+            tags=scenario.get("tags", []),
+            actions=scenario.get("steps", [])
+        )
 
     @classmethod
     def reverse_parse_test_file(cls, py_content: str) -> Dict[str, Any]:
@@ -267,6 +307,19 @@ class ASTNormalizer:
         if "page.goto" in raw_call:
             arg = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else "URL"
             return f"Navigate to {arg}"
+        if "wait_for_timeout" in raw_call:
+            arg = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else "1000"
+            return f"Wait for {arg}ms"
+        if "screenshot" in raw_call:
+            return f"Take screenshot: {raw_call}"
+        if "to_have_title" in raw_call:
+            arg = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else ""
+            return f"Assert page title equals '{arg}'"
+        if "to_have_url" in raw_call:
+            arg = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else ""
+            return f"Assert page URL matches '{arg}'"
+        if "page.request" in raw_call:
+            return f"API Request: {raw_call}"
         if "click" in raw_call:
             func_name = getattr(call_node.func, "attr", "")
             target = func_name.replace("click_", "").replace("_", " ")
@@ -275,6 +328,7 @@ class ASTNormalizer:
             func_name = getattr(call_node.func, "attr", "")
             target = func_name.replace("fill_", "").replace("_", " ")
             val = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else ""
+            return f"Type '{val}' into '{target}'"
         if "press" in raw_call:
             func_name = getattr(call_node.func, "attr", "")
             target = func_name.replace("press_", "").replace("_", " ")

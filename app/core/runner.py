@@ -3,7 +3,9 @@ import sys
 import threading
 import time
 import os
+import re
 from typing import List, Dict, Any, Callable, Optional
+from app.core.report_generator import ReportGenerator
 
 
 class TestRunner:
@@ -22,6 +24,8 @@ class TestRunner:
         env: str = "QA",
         capture_evidence: bool = True,
         evidence_format: str = "both",
+        retries: int = 0,
+        device: str = "Desktop 1280x800",
         on_log: Optional[Callable[[str, str], None]] = None,
         on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
         on_finished: Optional[Callable[[Dict[str, Any]], None]] = None
@@ -39,9 +43,10 @@ class TestRunner:
             failed_count = 0
             evidence_dirs = []
             evidence_reports = []
+            scenario_results = []
 
             if on_log:
-                on_log("INFO", f"Starting execution of {total_tests} scenario(s) on [{browser}] [Env: {env}] [Headless: {headless}] [Evidence: {'ON (' + evidence_format + ')' if capture_evidence else 'OFF'}]...")
+                on_log("INFO", f"Starting execution of {total_tests} scenario(s) on [{browser}] [Env: {env}] [Device: {device}] [Headless: {headless}] [Retries: {retries}] [Evidence: {'ON (' + evidence_format + ')' if capture_evidence else 'OFF'}]...")
 
             if on_progress:
                 on_progress({
@@ -85,65 +90,113 @@ class TestRunner:
                 env_vars["PYTHONPATH"] = f"{self.workspace_dir}{os.pathsep}{os.getcwd()}"
                 env_vars["CONDUIT_WORKSPACE"] = self.workspace_dir
                 env_vars["CONDUIT_BROWSER"] = browser
+                env_vars["CONDUIT_DEVICE"] = device
                 env_vars["CONDUIT_CAPTURE_EVIDENCE"] = "1" if capture_evidence else "0"
                 env_vars["CONDUIT_EVIDENCE_FORMAT"] = evidence_format
 
-                try:
-                    self._current_process = subprocess.Popen(
-                        cmd,
-                        cwd=self.workspace_dir,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        env=env_vars,
-                        text=True,
-                        bufsize=1
-                    )
+                sc_start = time.time()
+                sc_passed = False
+                sc_ev_dir = ""
+                attempts = 0
+                max_attempts = 1 + max(0, retries)
 
-                    if self._current_process.stdout:
-                        for line in iter(self._current_process.stdout.readline, ""):
-                            cleaned = line.rstrip()
-                            if not cleaned:
-                                continue
-                            if "[CONDUIT_EVIDENCE]:" in cleaned:
-                                ev_dir = cleaned.split("[CONDUIT_EVIDENCE]:")[-1].strip()
-                                evidence_dirs.append(ev_dir)
-                                if on_log:
-                                    on_log("SUCCESS", f"Step Evidence Folder: {ev_dir}")
-                                continue
-                            if "[CONDUIT_DOCX]:" in cleaned:
-                                docx_file = cleaned.split("[CONDUIT_DOCX]:")[-1].strip()
-                                evidence_reports.append(docx_file)
-                                if on_log:
-                                    on_log("SUCCESS", f"Word Evidence Report: {docx_file}")
-                                continue
+                while attempts < max_attempts and not sc_passed:
+                    attempts += 1
+                    if attempts > 1 and on_log:
+                        on_log("WARNING", f"Retrying scenario {scenario_name} (Attempt {attempts}/{max_attempts})...")
 
-                            log_type = "INFO"
-                            if "FAILED" in cleaned or "ERROR" in cleaned:
-                                log_type = "ERROR"
-                            elif "PASSED" in cleaned:
-                                log_type = "SUCCESS"
+                    try:
+                        self._current_process = subprocess.Popen(
+                            cmd,
+                            cwd=self.workspace_dir,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            env=env_vars,
+                            text=True,
+                            bufsize=1
+                        )
+
+                        if self._current_process.stdout:
+                            for line in iter(self._current_process.stdout.readline, ""):
+                                cleaned = line.rstrip()
+                                if not cleaned:
+                                    continue
+                                if "[CONDUIT_EVIDENCE]:" in cleaned:
+                                    ev_dir = cleaned.split("[CONDUIT_EVIDENCE]:")[-1].strip()
+                                    if ev_dir not in evidence_dirs:
+                                        evidence_dirs.append(ev_dir)
+                                    sc_ev_dir = ev_dir
+                                    if on_log:
+                                        on_log("SUCCESS", f"Step Evidence Folder: {ev_dir}")
+                                    continue
+                                if "[CONDUIT_DOCX]:" in cleaned:
+                                    docx_file = cleaned.split("[CONDUIT_DOCX]:")[-1].strip()
+                                    if docx_file not in evidence_reports:
+                                        evidence_reports.append(docx_file)
+                                    if on_log:
+                                        on_log("SUCCESS", f"Word Evidence Report: {docx_file}")
+                                    continue
+
+                                log_type = "INFO"
+                                if "FAILED" in cleaned or "ERROR" in cleaned:
+                                    log_type = "ERROR"
+                                elif "PASSED" in cleaned:
+                                    log_type = "SUCCESS"
+                                if on_log:
+                                    on_log(log_type, cleaned)
+
+                        self._current_process.wait()
+                        exit_code = self._current_process.returncode
+
+                        if exit_code == 0:
+                            sc_passed = True
                             if on_log:
-                                on_log(log_type, cleaned)
+                                on_log("SUCCESS", f"Scenario PASSED: {scenario_name}")
+                        else:
+                            if attempts >= max_attempts and on_log:
+                                on_log("ERROR", f"Scenario FAILED: {scenario_name} (Exit code {exit_code})")
 
-                    self._current_process.wait()
-                    exit_code = self._current_process.returncode
+                    except Exception as ex:
+                        if attempts >= max_attempts and on_log:
+                            on_log("ERROR", f"Execution error on {scenario_name}: {str(ex)}")
 
-                    if exit_code == 0:
-                        passed_count += 1
-                        if on_log:
-                            on_log("SUCCESS", f"Scenario PASSED: {scenario_name}")
-                    else:
-                        failed_count += 1
-                        if on_log:
-                            on_log("ERROR", f"Scenario FAILED: {scenario_name} (Exit code {exit_code})")
-
-                except Exception as ex:
+                if sc_passed:
+                    passed_count += 1
+                else:
                     failed_count += 1
-                    if on_log:
-                        on_log("ERROR", f"Execution error on {scenario_name}: {str(ex)}")
+
+                sc_dur = round(time.time() - sc_start, 2)
+                scenario_results.append({
+                    "name": scenario_name,
+                    "status": "Passed" if sc_passed else "Failed",
+                    "duration": sc_dur,
+                    "retries_attempted": attempts - 1,
+                    "evidence_dir": sc_ev_dir
+                })
 
             duration = round(time.time() - start_time, 2)
             self.is_running = False
+
+            html_report_path = ""
+            try:
+                html_report_path = ReportGenerator.generate_html_report(
+                    workspace_dir=self.workspace_dir,
+                    run_data={
+                        "total": total_tests,
+                        "passed": passed_count,
+                        "failed": failed_count,
+                        "duration": duration
+                    },
+                    scenario_results=scenario_results,
+                    env=env,
+                    browser=browser,
+                    device=device
+                )
+                if on_log:
+                    on_log("SUCCESS", f"Interactive HTML Report: {html_report_path}")
+            except Exception as ex:
+                if on_log:
+                    on_log("WARNING", f"Report generation error: {ex}")
 
             if on_progress:
                 on_progress({
@@ -165,7 +218,9 @@ class TestRunner:
                     "duration": duration,
                     "status": "Passed" if failed_count == 0 else "Failed",
                     "evidence_dirs": evidence_dirs,
-                    "evidence_reports": evidence_reports
+                    "evidence_reports": evidence_reports,
+                    "html_report": html_report_path,
+                    "scenario_results": scenario_results
                 })
 
         t = threading.Thread(target=_worker, daemon=True)

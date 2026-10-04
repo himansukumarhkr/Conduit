@@ -64,6 +64,25 @@ def pytest_runtest_makereport(item, call):
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
 
+@pytest.fixture(scope="session")
+def browser_context_args(browser_context_args):
+    device = os.environ.get("CONDUIT_DEVICE", "Desktop 1280x800")
+    context_args = dict(browser_context_args)
+    if "1920x1080" in device:
+        context_args["viewport"] = {"width": 1920, "height": 1080}
+    elif "1280x800" in device:
+        context_args["viewport"] = {"width": 1280, "height": 800}
+    elif "iPhone" in device:
+        context_args["viewport"] = {"width": 390, "height": 844}
+        context_args["is_mobile"] = True
+    elif "Pixel" in device:
+        context_args["viewport"] = {"width": 412, "height": 915}
+        context_args["is_mobile"] = True
+    elif "iPad" in device:
+        context_args["viewport"] = {"width": 1024, "height": 1366}
+        context_args["is_mobile"] = True
+    return context_args
+
 @pytest.fixture
 def test_data():
     from app.core.test_data_manager import TestDataManager

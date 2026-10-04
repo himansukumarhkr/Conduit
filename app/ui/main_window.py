@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import time
+import webbrowser
 from typing import List, Dict, Any
 
 from PySide6.QtCore import (
@@ -21,6 +22,7 @@ import ast
 
 from app.core.catalog_manager import CatalogManager
 from app.core.ast_normalizer import ASTNormalizer
+from app.core.selector_engine import SelectorEngine
 from app.core.recorder import BrowserRecorder
 from app.core.runner import TestRunner
 from app.core.test_data_manager import TestDataManager
@@ -394,6 +396,238 @@ class RecordDialog(QDialog):
         return name, url, tags
 
 
+class StepEditorDialog(QDialog):
+    def __init__(self, step_data: dict = None, parent=None):
+        super().__init__(parent)
+        self.step_data = dict(step_data or {})
+        self.setWindowTitle("Edit Flow Step" if step_data else "Add New Flow Step")
+        self.resize(540, 560)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0d1527;
+                border: 1px solid #2a3a5e;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #94a3b8;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QLineEdit, QComboBox {
+                background-color: #070b13;
+                border: 1px solid #243048;
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #ffffff;
+                font-size: 13px;
+                min-height: 36px;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border-color: #38bdf8;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 28px;
+                border-left: 1px solid #1e293b;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #0d1527;
+                color: #ffffff;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+                border: 1px solid #2a3a5e;
+                padding: 4px;
+            }
+            QPushButton#btnSave {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
+                color: white;
+                font-weight: bold;
+                border-radius: 8px;
+                padding: 10px 22px;
+                font-size: 13px;
+                border: none;
+                min-height: 36px;
+            }
+            QPushButton#btnSave:hover {
+                background: #0369a1;
+            }
+            QPushButton#btnCancel {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #93c5fd;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-size: 13px;
+                min-height: 36px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Edit Flow Step" if step_data else "Add New Flow Step")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        layout.addWidget(title)
+
+        layout.addWidget(QLabel("Action Type"))
+        self.action_combo = QComboBox()
+        self.actions_map = [
+            ("Click Element", "click"),
+            ("Fill / Type Text", "fill"),
+            ("Press Key", "press"),
+            ("Navigate to URL", "navigate"),
+            ("Assert Element Visible", "assert_visible"),
+            ("Assert Element Text", "assert_text"),
+            ("Assert Element Value", "assert_value"),
+            ("Assert Page Title", "assert_title"),
+            ("Assert Page URL", "assert_url"),
+            ("Wait / Delay (ms)", "wait"),
+            ("Take Screenshot", "take_screenshot"),
+            ("API Request (GET)", "api_request")
+        ]
+        for label, act_key in self.actions_map:
+            self.action_combo.addItem(label, act_key)
+
+        cur_act = self.step_data.get("action", "click")
+        for i, (_, k) in enumerate(self.actions_map):
+            if k == cur_act:
+                self.action_combo.setCurrentIndex(i)
+                break
+        self.action_combo.currentIndexChanged.connect(self._on_action_changed)
+        layout.addWidget(self.action_combo)
+
+        self.selector_frame = QWidget()
+        s_layout = QVBoxLayout(self.selector_frame)
+        s_layout.setContentsMargins(0, 0, 0, 0)
+        s_layout.setSpacing(10)
+
+        s_layout.addWidget(QLabel("Locator Strategy"))
+        self.strat_combo = QComboBox()
+        self.strat_combo.addItems(["CSS / Playwright Selector", "Text", "ID", "data-testid", "Role", "XPath"])
+        cur_sel = self.step_data.get("selector_info") or {}
+        strat_key = cur_sel.get("strategy", "css").lower()
+        strat_map = {"css": 0, "text": 1, "id": 2, "testid": 3, "role": 4, "xpath": 5}
+        self.strat_combo.setCurrentIndex(strat_map.get(strat_key, 0))
+        s_layout.addWidget(self.strat_combo)
+
+        s_layout.addWidget(QLabel("Target Selector / Element Query"))
+        display_val = cur_sel.get("display", "") or cur_sel.get("var_name", "")
+        self.selector_edit = QLineEdit(display_val)
+        self.selector_edit.setPlaceholderText("e.g. button.submit-btn, #login, Sign In, [data-testid='btn']")
+        s_layout.addWidget(self.selector_edit)
+
+        s_layout.addWidget(QLabel("Element Variable Name (POM Class Attribute)"))
+        self.var_name_edit = QLineEdit(cur_sel.get("var_name", ""))
+        self.var_name_edit.setPlaceholderText("e.g. submit_button, username_input")
+        s_layout.addWidget(self.var_name_edit)
+
+        layout.addWidget(self.selector_frame)
+
+        self.val_lbl = QLabel("Value / Parameter")
+        layout.addWidget(self.val_lbl)
+        self.val_edit = QLineEdit(str(self.step_data.get("value", "")))
+        self.val_edit.setPlaceholderText("e.g. test string, {{username}}, https://..., 1000")
+        layout.addWidget(self.val_edit)
+
+        layout.addWidget(QLabel("Step Description (Leave blank to auto-generate)"))
+        self.desc_edit = QLineEdit(self.step_data.get("human_description", ""))
+        self.desc_edit.setPlaceholderText("e.g. Click 'submit_button' button")
+        layout.addWidget(self.desc_edit)
+
+        self._on_action_changed()
+
+        layout.addStretch()
+
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("btnCancel")
+        cancel_btn.setCursor(Qt.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        btn_box.addWidget(cancel_btn)
+
+        save_btn = QPushButton("Save Step")
+        save_btn.setObjectName("btnSave")
+        save_btn.setCursor(Qt.PointingHandCursor)
+        save_btn.clicked.connect(self.on_save)
+        btn_box.addWidget(save_btn)
+        layout.addLayout(btn_box)
+
+    def _on_action_changed(self):
+        act_key = self.action_combo.currentData()
+        non_elem = act_key in ["navigate", "wait", "take_screenshot", "assert_title", "assert_url", "api_request"]
+        self.selector_frame.setVisible(not non_elem)
+        if act_key == "navigate":
+            self.val_lbl.setText("URL to Navigate")
+            self.val_edit.setPlaceholderText("https://example.com or {{base_url}}")
+        elif act_key == "wait":
+            self.val_lbl.setText("Wait Timeout in Milliseconds")
+            self.val_edit.setPlaceholderText("1000")
+        elif act_key == "take_screenshot":
+            self.val_lbl.setText("Screenshot Filename / Path")
+            self.val_edit.setPlaceholderText("screenshot.png")
+        elif act_key == "assert_title":
+            self.val_lbl.setText("Expected Page Title")
+            self.val_edit.setPlaceholderText("e.g. Dashboard")
+        elif act_key == "assert_url":
+            self.val_lbl.setText("Expected Page URL / Substring")
+            self.val_edit.setPlaceholderText("e.g. /dashboard")
+        elif act_key == "api_request":
+            self.val_lbl.setText("API Endpoint URL")
+            self.val_edit.setPlaceholderText("https://api.example.com/v1/status")
+        elif act_key == "fill":
+            self.val_lbl.setText("Text to Type")
+            self.val_edit.setPlaceholderText("Enter text or {{test_var}}")
+        elif act_key == "press":
+            self.val_lbl.setText("Key to Press")
+            self.val_edit.setPlaceholderText("Enter, Tab, Escape, Backspace")
+        elif act_key in ["assert_text", "assert_value"]:
+            self.val_lbl.setText("Expected Value")
+            self.val_edit.setPlaceholderText("Expected text string")
+        else:
+            self.val_lbl.setText("Value / Parameter (Optional)")
+            self.val_edit.setPlaceholderText("")
+
+    def on_save(self):
+        act_key = self.action_combo.currentData()
+        val = self.val_edit.text().strip()
+        strat_text = self.strat_combo.currentText().lower()
+        strat = "css"
+        if "text" in strat_text:
+            strat = "text"
+        elif "id" in strat_text and "data" not in strat_text:
+            strat = "id"
+        elif "data-testid" in strat_text:
+            strat = "testid"
+        elif "role" in strat_text:
+            strat = "role"
+        elif "xpath" in strat_text:
+            strat = "xpath"
+
+        raw_sel = self.selector_edit.text().strip()
+        var_name = self.var_name_edit.text().strip()
+        if not var_name and raw_sel:
+            var_name = SelectorEngine.clean_identifier(raw_sel)
+        elif not var_name:
+            var_name = "element"
+
+        sel_info = SelectorEngine.create_custom_selector(strat, raw_sel or var_name, var_name)
+        human_desc = self.desc_edit.text().strip()
+        if not human_desc:
+            human_desc = SelectorEngine.generate_human_step(act_key, sel_info, val)
+
+        self.step_data["action"] = act_key
+        self.step_data["value"] = val
+        self.step_data["selector_info"] = sel_info
+        self.step_data["human_description"] = human_desc
+        self.accept()
+
+    def get_step_data(self) -> dict:
+        return self.step_data
+
+
 class SettingsDialog(QDialog):
     def __init__(self, current_settings: dict, available_envs: list = None, parent=None):
         super().__init__(parent)
@@ -576,6 +810,34 @@ class SettingsDialog(QDialog):
             self.format_combo.setCurrentIndex(0)
         layout.addWidget(self.format_combo)
 
+        layout.addWidget(QLabel("Flaky Test Retries (Auto-retry failed scenarios)"))
+        self.retries_combo = QComboBox()
+        self.retries_combo.addItems(["0 (No Retries)", "1 Retry", "2 Retries", "3 Retries", "5 Retries"])
+        cur_retries = self.settings_data.get("retries", 0)
+        retries_map = {0: 0, 1: 1, 2: 2, 3: 3, 5: 4}
+        self.retries_combo.setCurrentIndex(retries_map.get(cur_retries, 0))
+        layout.addWidget(self.retries_combo)
+
+        layout.addWidget(QLabel("Device Emulation / Viewport Preset"))
+        self.device_combo = QComboBox()
+        self.device_combo.addItems([
+            "Desktop 1280x800",
+            "Desktop 1920x1080",
+            "iPhone 14 (390x844)",
+            "Pixel 7 (412x915)",
+            "iPad Pro (1024x1366)"
+        ])
+        cur_dev = self.settings_data.get("device", "Desktop 1280x800")
+        if cur_dev in [
+            "Desktop 1280x800",
+            "Desktop 1920x1080",
+            "iPhone 14 (390x844)",
+            "Pixel 7 (412x915)",
+            "iPad Pro (1024x1366)"
+        ]:
+            self.device_combo.setCurrentText(cur_dev)
+        layout.addWidget(self.device_combo)
+
         scroll.setWidget(container)
         main_layout.addWidget(scroll, 1)
 
@@ -610,6 +872,10 @@ class SettingsDialog(QDialog):
         f_idx = self.format_combo.currentIndex()
         fmt_val = "both" if f_idx == 0 else ("word" if f_idx == 1 else "folder")
         self.settings_data["evidence_format"] = fmt_val
+        r_idx = self.retries_combo.currentIndex()
+        retries_vals = [0, 1, 2, 3, 5]
+        self.settings_data["retries"] = retries_vals[r_idx] if r_idx < len(retries_vals) else 0
+        self.settings_data["device"] = self.device_combo.currentText()
         self.accept()
 
     def get_settings(self) -> dict:
@@ -1411,6 +1677,10 @@ class ConduitMainWindow(QMainWindow):
 
         self.last_evidence_dir = ""
         self.last_docx_report = ""
+        self.last_html_report = ""
+        rep_candidate = os.path.join(workspace_dir, "reports", "latest_report.html")
+        if os.path.exists(rep_candidate):
+            self.last_html_report = rep_candidate
 
         self.current_env = self.test_data_mgr.get_active_environment()
         self.selected_browser = "msedge"
@@ -1425,7 +1695,9 @@ class ConduitMainWindow(QMainWindow):
             "headless": True,
             "record_traces": True,
             "capture_evidence": True,
-            "evidence_format": "both"
+            "evidence_format": "both",
+            "retries": 0,
+            "device": "Desktop 1280x800"
         }
 
         self.bridge = ExecutionBridge()
@@ -1626,6 +1898,9 @@ class ConduitMainWindow(QMainWindow):
             self.settings = dlg.get_settings()
             self.set_environment(self.settings.get("env", "QA"))
             self.set_browser(self.settings.get("browser", "msedge"))
+            new_dev = self.settings.get("device", "Desktop 1280x800")
+            if hasattr(self, "device_combo_top"):
+                self.device_combo_top.setCurrentText(new_dev)
             new_hl = self.settings.get("headless", True)
             if self.headless != new_hl:
                 self.toggle_headless()
@@ -1767,6 +2042,26 @@ class ConduitMainWindow(QMainWindow):
         self.btn_evidence.clicked.connect(self.toggle_evidence)
         layout.addWidget(self.btn_evidence)
 
+        self.btn_top_report = QPushButton("📊 Report")
+        self.btn_top_report.setCursor(Qt.PointingHandCursor)
+        self.btn_top_report.setStyleSheet("""
+            QPushButton {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #38bdf8;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 6px 12px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                border-color: #38bdf8;
+                background-color: #1e293b;
+            }
+        """)
+        self.btn_top_report.clicked.connect(self.open_latest_html_report)
+        layout.addWidget(self.btn_top_report)
+
         browser_box = QFrame()
         browser_box.setStyleSheet("background-color: #131b2e; border: 1px solid #1e293b; border-radius: 8px; padding: 4px;")
         b_layout = QHBoxLayout(browser_box)
@@ -1790,6 +2085,30 @@ class ConduitMainWindow(QMainWindow):
         self.headless_btn.setStyleSheet("background-color: transparent; color: #94a3b8; font-size: 11px; padding: 4px 6px; border: 1px solid #334155; border-radius: 4px;")
         self.headless_btn.clicked.connect(self.toggle_headless)
         b_layout.addWidget(self.headless_btn)
+
+        self.device_combo_top = QComboBox()
+        self.device_combo_top.addItems([
+            "Desktop 1280x800",
+            "Desktop 1920x1080",
+            "iPhone 14 (390x844)",
+            "Pixel 7 (412x915)",
+            "iPad Pro (1024x1366)"
+        ])
+        self.device_combo_top.setStyleSheet("""
+            QComboBox {
+                background-color: transparent;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                padding: 2px 6px;
+                color: #38bdf8;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """)
+        cur_dev = self.settings.get("device", "Desktop 1280x800")
+        self.device_combo_top.setCurrentText(cur_dev)
+        self.device_combo_top.currentTextChanged.connect(self.on_device_changed)
+        b_layout.addWidget(self.device_combo_top)
 
         layout.addWidget(browser_box)
 
@@ -1930,9 +2249,11 @@ class ConduitMainWindow(QMainWindow):
         layout.setSpacing(12)
 
         filter_row = QHBoxLayout()
-        search_box = QLineEdit()
-        search_box.setPlaceholderText("Search flows, tags, pages...")
-        search_box.setStyleSheet("""
+        filter_row.setSpacing(8)
+
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("🔍 Search scenarios, tags, pages...")
+        self.search_box.setStyleSheet("""
             QLineEdit {
                 background-color: #0b1120;
                 border: 1px solid #1e293b;
@@ -1940,15 +2261,98 @@ class ConduitMainWindow(QMainWindow):
                 padding: 6px 12px;
                 color: #ffffff;
                 font-size: 12px;
+                min-height: 32px;
             }
             QLineEdit:focus {
                 border-color: #38bdf8;
             }
         """)
-        search_box.textChanged.connect(self.filter_table)
-        filter_row.addWidget(search_box, 1)
+        self.search_box.textChanged.connect(self.apply_catalog_filters)
+        filter_row.addWidget(self.search_box, 1)
 
-        filter_row.addStretch()
+        self.status_filter_combo = QComboBox()
+        self.status_filter_combo.addItems(["All Statuses", "Passed Only", "Failed Only"])
+        self.status_filter_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #0b1120;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                padding: 4px 10px;
+                color: #94a3b8;
+                font-size: 11px;
+                font-weight: bold;
+                min-height: 32px;
+            }
+            QComboBox:hover {
+                border-color: #38bdf8;
+                color: #ffffff;
+            }
+        """)
+        self.status_filter_combo.currentIndexChanged.connect(self.apply_catalog_filters)
+        filter_row.addWidget(self.status_filter_combo)
+
+        btn_all = QPushButton("☑ All")
+        btn_all.setCursor(Qt.PointingHandCursor)
+        btn_all.setStyleSheet("""
+            QPushButton {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #93c5fd;
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+                font-weight: bold;
+                min-height: 32px;
+            }
+            QPushButton:hover {
+                border-color: #38bdf8;
+                color: #ffffff;
+            }
+        """)
+        btn_all.clicked.connect(lambda: self.set_bulk_selection(True))
+        filter_row.addWidget(btn_all)
+
+        btn_none = QPushButton("☐ None")
+        btn_none.setCursor(Qt.PointingHandCursor)
+        btn_none.setStyleSheet("""
+            QPushButton {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #94a3b8;
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+                font-weight: bold;
+                min-height: 32px;
+            }
+            QPushButton:hover {
+                border-color: #38bdf8;
+                color: #ffffff;
+            }
+        """)
+        btn_none.clicked.connect(lambda: self.set_bulk_selection(False))
+        filter_row.addWidget(btn_none)
+
+        btn_failed = QPushButton("⚡ Failed Only")
+        btn_failed.setCursor(Qt.PointingHandCursor)
+        btn_failed.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(239, 68, 68, 0.15);
+                border: 1px solid #ef4444;
+                color: #f87171;
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+                font-weight: bold;
+                min-height: 32px;
+            }
+            QPushButton:hover {
+                background-color: rgba(239, 68, 68, 0.3);
+            }
+        """)
+        btn_failed.clicked.connect(self.select_failed_scenarios)
+        filter_row.addWidget(btn_failed)
+
         layout.addLayout(filter_row)
 
         self.table = QTableWidget()
@@ -1975,15 +2379,41 @@ class ConduitMainWindow(QMainWindow):
 
         return container
 
-    def filter_table(self, query: str):
-        q = query.strip().lower()
+    def apply_catalog_filters(self):
+        query = self.search_box.text().strip().lower() if hasattr(self, "search_box") else ""
+        s_filter = self.status_filter_combo.currentText() if hasattr(self, "status_filter_combo") else "All Statuses"
         for r in range(self.table.rowCount()):
             name_item = self.table.item(r, 1)
             tags_item = self.table.item(r, 2)
+            status_item = self.table.item(r, 4)
+
             name_text = name_item.text().lower() if name_item else ""
             tags_text = tags_item.text().lower() if tags_item else ""
-            matches = (q in name_text) or (q in tags_text)
-            self.table.setRowHidden(r, not matches)
+            status_text = status_item.text() if status_item else ""
+
+            text_matches = (query in name_text) or (query in tags_text) or not query
+            status_matches = True
+            if s_filter == "Passed Only":
+                status_matches = (status_text == "Passed")
+            elif s_filter == "Failed Only":
+                status_matches = (status_text == "Failed")
+
+            self.table.setRowHidden(r, not (text_matches and status_matches))
+
+    def set_bulk_selection(self, checked: bool):
+        for r in range(self.table.rowCount()):
+            if not self.table.isRowHidden(r):
+                chk = self.table.item(r, 0)
+                if chk:
+                    chk.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+
+    def select_failed_scenarios(self):
+        for r in range(self.table.rowCount()):
+            chk = self.table.item(r, 0)
+            status_it = self.table.item(r, 4)
+            if chk and status_it:
+                is_failed = status_it.text() == "Failed"
+                chk.setCheckState(Qt.Checked if is_failed else Qt.Unchecked)
 
     def build_inspector_panel(self):
         panel = QFrame()
@@ -2005,9 +2435,30 @@ class ConduitMainWindow(QMainWindow):
         steps_layout.setContentsMargins(10, 10, 10, 10)
         steps_layout.setSpacing(8)
 
+        steps_hdr = QHBoxLayout()
         self.steps_title_lbl = QLabel("Flow Steps: User Login Flow")
         self.steps_title_lbl.setStyleSheet("font-size: 12px; font-weight: bold; color: #cbd5e1;")
-        steps_layout.addWidget(self.steps_title_lbl)
+        steps_hdr.addWidget(self.steps_title_lbl, 1)
+
+        self.btn_add_step = QPushButton("+ Add Step")
+        self.btn_add_step.setCursor(Qt.PointingHandCursor)
+        self.btn_add_step.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 4px 10px;
+                border: none;
+            }
+            QPushButton:hover {
+                background: #0369a1;
+            }
+        """)
+        self.btn_add_step.clicked.connect(self.add_flow_step)
+        steps_hdr.addWidget(self.btn_add_step)
+        steps_layout.addLayout(steps_hdr)
 
         self.steps_scroll = QScrollArea()
         self.steps_scroll.setWidgetResizable(True)
@@ -2153,6 +2604,28 @@ class ConduitMainWindow(QMainWindow):
         """)
         self.btn_open_evidence.clicked.connect(self.open_last_evidence_dir)
         status_box.addWidget(self.btn_open_evidence)
+
+        self.btn_open_report = QPushButton("📊 View HTML Report")
+        self.btn_open_report.setCursor(Qt.PointingHandCursor)
+        self.btn_open_report.setVisible(bool(getattr(self, "last_html_report", "")))
+        self.btn_open_report.setStyleSheet("""
+            QPushButton {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #34d399;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 2px 10px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1e293b;
+                border-color: #34d399;
+                color: #ffffff;
+            }
+        """)
+        self.btn_open_report.clicked.connect(self.open_latest_html_report)
+        status_box.addWidget(self.btn_open_report)
         layout.addLayout(status_box)
 
         self.pbar = QProgressBar()
@@ -2282,7 +2755,7 @@ class ConduitMainWindow(QMainWindow):
             """)
             card_layout = QHBoxLayout(step_card)
             card_layout.setContentsMargins(10, 8, 10, 8)
-            card_layout.setSpacing(10)
+            card_layout.setSpacing(8)
 
             num_lbl = QLabel(str(idx + 1))
             num_lbl.setFixedSize(22, 22)
@@ -2297,12 +2770,79 @@ class ConduitMainWindow(QMainWindow):
             """)
             card_layout.addWidget(num_lbl)
 
+            act_type = (st.get("action") or "").upper()
+            if not act_type:
+                code_text = st.get("code", "").lower()
+                if "goto" in code_text:
+                    act_type = "NAVIGATE"
+                elif "click" in code_text:
+                    act_type = "CLICK"
+                elif "fill" in code_text:
+                    act_type = "FILL"
+                elif "assert" in code_text or "expect" in code_text:
+                    act_type = "ASSERT"
+                elif "wait" in code_text:
+                    act_type = "WAIT"
+                elif "screenshot" in code_text:
+                    act_type = "SCREENSHOT"
+                else:
+                    act_type = "STEP"
+
+            act_badge_colors = {
+                "CLICK": ("rgba(37,99,235,0.2)", "#60a5fa"),
+                "FILL": ("rgba(168,85,247,0.2)", "#c084fc"),
+                "NAVIGATE": ("rgba(6,182,212,0.2)", "#22d3ee"),
+                "ASSERT": ("rgba(16,185,129,0.2)", "#34d399"),
+                "WAIT": ("rgba(245,158,11,0.2)", "#fbbf24"),
+                "SCREENSHOT": ("rgba(236,72,153,0.2)", "#f472b6"),
+                "PRESS": ("rgba(99,102,241,0.2)", "#818cf8"),
+                "API_REQUEST": ("rgba(249,115,22,0.2)", "#fb923c")
+            }
+            bg, fg = act_badge_colors.get(act_type, ("rgba(100,116,139,0.2)", "#94a3b8"))
+            act_badge = QLabel(act_type)
+            act_badge.setStyleSheet(f"background-color: {bg}; color: {fg}; font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 4px; border: 1px solid {fg};")
+            card_layout.addWidget(act_badge)
+
             desc_text = st.get("human_description", f"Step {idx + 1}")
             desc_lbl = QLabel(desc_text)
             desc_lbl.setWordWrap(True)
             desc_lbl.setStyleSheet("color: #f8fafc; font-size: 12px; font-weight: 500; background: transparent; border: none;")
             card_layout.addWidget(desc_lbl, 1)
 
+            btn_box = QHBoxLayout()
+            btn_box.setSpacing(4)
+
+            btn_up = QPushButton("⬆")
+            btn_up.setFixedSize(22, 22)
+            btn_up.setCursor(Qt.PointingHandCursor)
+            btn_up.setStyleSheet("background: transparent; color: #94a3b8; font-size: 11px; border: 1px solid #1e293b; border-radius: 4px;")
+            btn_up.setEnabled(idx > 0)
+            btn_up.clicked.connect(lambda _, i=idx: self.move_flow_step(i, -1))
+            btn_box.addWidget(btn_up)
+
+            btn_down = QPushButton("⬇")
+            btn_down.setFixedSize(22, 22)
+            btn_down.setCursor(Qt.PointingHandCursor)
+            btn_down.setStyleSheet("background: transparent; color: #94a3b8; font-size: 11px; border: 1px solid #1e293b; border-radius: 4px;")
+            btn_down.setEnabled(idx < len(steps) - 1)
+            btn_down.clicked.connect(lambda _, i=idx: self.move_flow_step(i, 1))
+            btn_box.addWidget(btn_down)
+
+            btn_edit = QPushButton("✏️")
+            btn_edit.setFixedSize(22, 22)
+            btn_edit.setCursor(Qt.PointingHandCursor)
+            btn_edit.setStyleSheet("background: transparent; color: #38bdf8; font-size: 11px; border: 1px solid #1e293b; border-radius: 4px;")
+            btn_edit.clicked.connect(lambda _, i=idx: self.edit_flow_step(i))
+            btn_box.addWidget(btn_edit)
+
+            btn_del = QPushButton("🗑️")
+            btn_del.setFixedSize(22, 22)
+            btn_del.setCursor(Qt.PointingHandCursor)
+            btn_del.setStyleSheet("background: transparent; color: #f87171; font-size: 11px; border: 1px solid #1e293b; border-radius: 4px;")
+            btn_del.clicked.connect(lambda _, i=idx: self.delete_flow_step(i))
+            btn_box.addWidget(btn_del)
+
+            card_layout.addLayout(btn_box)
             self.steps_container_layout.addWidget(step_card)
 
         self.steps_container_layout.addStretch()
@@ -2348,6 +2888,92 @@ class ConduitMainWindow(QMainWindow):
         self.append_log("SUCCESS", f"Saved code for '{sc.get('name')}' to disk and synchronized steps.")
         cur_id = self.selected_scenario_id
         self.select_scenario(cur_id)
+
+    def add_flow_step(self):
+        if not getattr(self, "selected_scenario_id", None):
+            return
+        sc = self.catalog.get_scenario(self.selected_scenario_id)
+        if not sc:
+            return
+        dlg = StepEditorDialog(parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            new_step = dlg.get_step_data()
+            if "steps" not in sc:
+                sc["steps"] = []
+            sc["steps"].append(new_step)
+            self._sync_scenario_steps_and_save(sc)
+            self.append_log("SUCCESS", f"Added step: {new_step.get('human_description')}")
+
+    def edit_flow_step(self, step_idx: int):
+        if not getattr(self, "selected_scenario_id", None):
+            return
+        sc = self.catalog.get_scenario(self.selected_scenario_id)
+        if not sc or "steps" not in sc or step_idx >= len(sc["steps"]):
+            return
+        st = sc["steps"][step_idx]
+        dlg = StepEditorDialog(step_data=st, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            sc["steps"][step_idx] = dlg.get_step_data()
+            self._sync_scenario_steps_and_save(sc)
+            self.append_log("SUCCESS", f"Updated step {step_idx + 1}")
+
+    def move_flow_step(self, step_idx: int, direction: int):
+        if not getattr(self, "selected_scenario_id", None):
+            return
+        sc = self.catalog.get_scenario(self.selected_scenario_id)
+        if not sc or "steps" not in sc:
+            return
+        steps = sc["steps"]
+        target = step_idx + direction
+        if 0 <= target < len(steps):
+            steps[step_idx], steps[target] = steps[target], steps[step_idx]
+            self._sync_scenario_steps_and_save(sc)
+
+    def delete_flow_step(self, step_idx: int):
+        if not getattr(self, "selected_scenario_id", None):
+            return
+        sc = self.catalog.get_scenario(self.selected_scenario_id)
+        if not sc or "steps" not in sc or step_idx >= len(sc["steps"]):
+            return
+        deleted = sc["steps"].pop(step_idx)
+        self._sync_scenario_steps_and_save(sc)
+        self.append_log("INFO", f"Deleted step {step_idx + 1}: {deleted.get('human_description', '')}")
+
+    def _sync_scenario_steps_and_save(self, sc: dict):
+        try:
+            res = self.ast_engine.reconstruct_scenario(sc)
+            sc["code"] = res["test_code"]
+            sc["steps"] = res["steps"]
+            if res.get("pages"):
+                sc["pages"] = res["pages"]
+                for p in res["pages"]:
+                    p_file = os.path.join(self.catalog.pages_dir, p["file_name"])
+                    with open(p_file, "w", encoding="utf-8") as pf:
+                        pf.write(p["code"])
+
+            test_file = os.path.join(self.catalog.tests_dir, sc.get("file_name", f"test_{sc.get('id')}.py"))
+            with open(test_file, "w", encoding="utf-8") as tf:
+                tf.write(res["test_code"])
+
+            self.catalog.add_or_update_scenario(sc)
+            self.select_scenario(sc["id"])
+        except Exception as ex:
+            self.catalog.add_or_update_scenario(sc)
+            self.select_scenario(sc["id"])
+            self.append_log("WARNING", f"Step synchronized with warning: {ex}")
+
+    def open_latest_html_report(self):
+        report_path = getattr(self, "last_html_report", None) or os.path.join(self.workspace_dir, "reports", "latest_report.html")
+        if os.path.exists(report_path):
+            abs_url = f"file:///{os.path.abspath(report_path).replace('\\', '/')}"
+            webbrowser.open(abs_url)
+            self.append_log("SUCCESS", f"Opened HTML execution report: {report_path}")
+        else:
+            self.append_log("WARNING", "No execution report found yet. Run tests to generate a report.")
+
+    def on_device_changed(self, dev_name: str):
+        self.settings["device"] = dev_name
+        self.append_log("INFO", f"Device emulation preset set to [{dev_name}]")
 
     def run_current_flow(self):
         if not getattr(self, "selected_scenario_id", None):
@@ -2395,6 +3021,7 @@ class ConduitMainWindow(QMainWindow):
         self.load_scenarios()
         ev_dirs = result.get("evidence_dirs", [])
         reports = result.get("evidence_reports", [])
+        html_rep = result.get("html_report", "")
         if ev_dirs:
             self.last_evidence_dir = ev_dirs[-1]
             self.btn_open_evidence.setVisible(True)
@@ -2402,6 +3029,10 @@ class ConduitMainWindow(QMainWindow):
         if reports:
             self.last_docx_report = reports[-1]
             self.append_log("SUCCESS", f"Word Evidence Report created: {self.last_docx_report}")
+        if html_rep and os.path.exists(html_rep):
+            self.last_html_report = html_rep
+            self.btn_open_report.setVisible(True)
+            self.append_log("SUCCESS", f"Interactive HTML Report generated: {html_rep}")
 
     def on_run_selected(self):
         selected_ids = []
@@ -2451,6 +3082,8 @@ class ConduitMainWindow(QMainWindow):
 
         capture_ev = self.settings.get("capture_evidence", True)
         ev_fmt = self.settings.get("evidence_format", "both")
+        retries = self.settings.get("retries", 0)
+        device = self.settings.get("device", "Desktop 1280x800")
 
         self.runner.run_tests_async(
             test_file_paths=test_files,
@@ -2459,6 +3092,8 @@ class ConduitMainWindow(QMainWindow):
             env=self.current_env,
             capture_evidence=capture_ev,
             evidence_format=ev_fmt,
+            retries=retries,
+            device=device,
             on_log=_on_log,
             on_progress=_on_prog,
             on_finished=_on_fin
