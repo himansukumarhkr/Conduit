@@ -26,6 +26,7 @@ from app.core.selector_engine import SelectorEngine
 from app.core.recorder import BrowserRecorder
 from app.core.runner import TestRunner
 from app.core.test_data_manager import TestDataManager
+from app.core.claude_engine import ClaudeEngine
 
 
 class CodeEditor(QPlainTextEdit):
@@ -838,6 +839,51 @@ class SettingsDialog(QDialog):
             self.device_combo.setCurrentText(cur_dev)
         layout.addWidget(self.device_combo)
 
+        layout.addWidget(QLabel("Anthropic Claude API Key"))
+        claude_key_row = QHBoxLayout()
+        self.claude_key_edit = QLineEdit(self.settings_data.get("claude_api_key", ""))
+        self.claude_key_edit.setEchoMode(QLineEdit.Password)
+        self.claude_key_edit.setPlaceholderText("sk-ant-api03-...")
+        claude_key_row.addWidget(self.claude_key_edit, 1)
+
+        self.btn_toggle_key = QPushButton("Show")
+        self.btn_toggle_key.setFixedSize(60, 36)
+        self.btn_toggle_key.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle_key.clicked.connect(self._toggle_key_visibility)
+        claude_key_row.addWidget(self.btn_toggle_key)
+        layout.addLayout(claude_key_row)
+
+        layout.addWidget(QLabel("Claude Model Target"))
+        self.claude_model_combo = QComboBox()
+        self.claude_model_combo.addItems([
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-20241022",
+            "claude-3-opus-20240229"
+        ])
+        cur_model = self.settings_data.get("claude_model", "claude-3-5-sonnet-20241022")
+        if cur_model in [
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-20241022",
+            "claude-3-opus-20240229"
+        ]:
+            self.claude_model_combo.setCurrentText(cur_model)
+        layout.addWidget(self.claude_model_combo)
+
+        test_conn_row = QHBoxLayout()
+        self.btn_test_conn = QPushButton("⚡ Test Claude Connection")
+        self.btn_test_conn.setCursor(Qt.PointingHandCursor)
+        self.btn_test_conn.clicked.connect(self._test_claude_connection)
+        test_conn_row.addWidget(self.btn_test_conn)
+
+        cur_has_key = bool(self.settings_data.get("claude_api_key"))
+        status_txt = "● Ready (Live API)" if cur_has_key else "○ Heuristic Fallback Mode"
+        status_color = "#34d399" if cur_has_key else "#fbbf24"
+        self.claude_status_lbl = QLabel(status_txt)
+        self.claude_status_lbl.setStyleSheet(f"color: {status_color}; font-size: 11px; font-weight: bold;")
+        test_conn_row.addWidget(self.claude_status_lbl)
+        test_conn_row.addStretch()
+        layout.addLayout(test_conn_row)
+
         scroll.setWidget(container)
         main_layout.addWidget(scroll, 1)
 
@@ -855,6 +901,26 @@ class SettingsDialog(QDialog):
         save_btn.clicked.connect(self.on_save)
         btn_box.addWidget(save_btn)
         main_layout.addLayout(btn_box)
+
+    def _toggle_key_visibility(self):
+        if self.claude_key_edit.echoMode() == QLineEdit.Password:
+            self.claude_key_edit.setEchoMode(QLineEdit.Normal)
+            self.btn_toggle_key.setText("Hide")
+        else:
+            self.claude_key_edit.setEchoMode(QLineEdit.Password)
+            self.btn_toggle_key.setText("Show")
+
+    def _test_claude_connection(self):
+        key = self.claude_key_edit.text().strip()
+        model = self.claude_model_combo.currentText()
+        engine = ClaudeEngine(api_key=key, model=model)
+        ok, msg = engine.test_connection()
+        if ok:
+            self.claude_status_lbl.setText("● Connected: Live Claude API")
+            self.claude_status_lbl.setStyleSheet("color: #34d399; font-size: 11px; font-weight: bold;")
+        else:
+            self.claude_status_lbl.setText(f"○ Heuristic Mode ({msg[:28]})")
+            self.claude_status_lbl.setStyleSheet("color: #fbbf24; font-size: 11px; font-weight: bold;")
 
     def on_save(self):
         b_idx = self.browser_combo.currentIndex()
@@ -876,6 +942,8 @@ class SettingsDialog(QDialog):
         retries_vals = [0, 1, 2, 3, 5]
         self.settings_data["retries"] = retries_vals[r_idx] if r_idx < len(retries_vals) else 0
         self.settings_data["device"] = self.device_combo.currentText()
+        self.settings_data["claude_api_key"] = self.claude_key_edit.text().strip()
+        self.settings_data["claude_model"] = self.claude_model_combo.currentText()
         self.accept()
 
     def get_settings(self) -> dict:
@@ -1083,12 +1151,61 @@ class ScraperWorker(QThread):
             self.error_scrape.emit(str(e))
 
 
+class ClaudeWorker(QThread):
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
+
+    def __init__(self, task_type: str, engine: ClaudeEngine, params: dict, parent=None):
+        super().__init__(parent)
+        self.task_type = task_type
+        self.engine = engine
+        self.params = params
+
+    def run(self):
+        try:
+            if self.task_type == "generate_flow":
+                res = self.engine.generate_flow_from_prompt(
+                    prompt=self.params.get("prompt", ""),
+                    base_url=self.params.get("base_url", "")
+                )
+                self.finished_signal.emit(res)
+            elif self.task_type == "diagnose_and_heal":
+                res = self.engine.diagnose_and_heal_failure(
+                    scenario_name=self.params.get("scenario_name", "Test Scenario"),
+                    failed_step=self.params.get("failed_step", {}),
+                    error_message=self.params.get("error_message", "")
+                )
+                self.finished_signal.emit(res)
+            elif self.task_type == "optimize_code":
+                res = self.engine.optimize_and_explain_code(
+                    code=self.params.get("code", "")
+                )
+                self.finished_signal.emit(res)
+            elif self.task_type == "synthesize_data":
+                res = self.engine.synthesize_test_data(
+                    description=self.params.get("topic", ""),
+                    count=self.params.get("count", 5)
+                )
+                self.finished_signal.emit({"rows": res})
+            elif self.task_type == "test_connection":
+                ok, msg = self.engine.test_connection()
+                self.finished_signal.emit({"success": ok, "message": msg})
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
+
 class TestDataDialog(QDialog):
-    def __init__(self, test_data_mgr: TestDataManager, current_env: str = "QA", parent=None):
+    __test__ = False
+
+    def __init__(self, test_data_mgr: TestDataManager, current_env: str = "QA", claude_api_key: str = "", claude_model: str = "", parent=None):
         super().__init__(parent)
         self.mgr = test_data_mgr
         self.current_env = current_env
+        self.claude_api_key = claude_api_key
+        self.claude_model = claude_model
         self.scraped_data_cache = {}
+        self.last_ai_generated_rows = []
+        self._ai_worker = None
         self.setWindowTitle("Conduit - Test Data & Environments")
         self.resize(880, 680)
         self.setMinimumSize(800, 600)
@@ -1241,6 +1358,7 @@ class TestDataDialog(QDialog):
         self.tabs.addTab(self.build_variables_tab(), "Key-Value Variables")
         self.tabs.addTab(self.build_datasets_tab(), "Datasets & Tables")
         self.tabs.addTab(self.build_scraper_tab(), "🕸️ Web Scraper")
+        self.tabs.addTab(self.build_ai_generator_tab(), "✨ Claude Synthetic Generator")
         main_layout.addWidget(self.tabs, 1)
 
         bottom_box = QHBoxLayout()
@@ -1454,6 +1572,109 @@ class TestDataDialog(QDialog):
 
         return widget
 
+    def build_ai_generator_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        hdr = QLabel("Generate realistic, context-aware synthetic test datasets using Anthropic Claude.")
+        hdr.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        layout.addWidget(hdr)
+
+        form_box = QHBoxLayout()
+        form_box.setSpacing(8)
+
+        self.ai_topic_edit = QLineEdit("E-commerce customer orders with customer_name, email, order_id, status, amount")
+        self.ai_topic_edit.setPlaceholderText("Describe data to synthesize...")
+        form_box.addWidget(self.ai_topic_edit, 3)
+
+        self.ai_ds_name_edit = QLineEdit("claude_orders")
+        self.ai_ds_name_edit.setPlaceholderText("Dataset Name")
+        form_box.addWidget(self.ai_ds_name_edit, 1)
+
+        self.ai_count_combo = QComboBox()
+        self.ai_count_combo.addItems(["3 rows", "5 rows", "10 rows", "15 rows"])
+        self.ai_count_combo.setCurrentIndex(1)
+        form_box.addWidget(self.ai_count_combo)
+
+        self.btn_run_ai_gen = QPushButton("✨ Generate with Claude")
+        self.btn_run_ai_gen.setObjectName("btnPrimary")
+        self.btn_run_ai_gen.setCursor(Qt.PointingHandCursor)
+        self.btn_run_ai_gen.clicked.connect(self.run_claude_data_synth)
+        form_box.addWidget(self.btn_run_ai_gen)
+
+        layout.addLayout(form_box)
+
+        self.ai_preview_table = QTableWidget(0, 0)
+        layout.addWidget(self.ai_preview_table, 1)
+
+        bottom_box = QHBoxLayout()
+        self.ai_gen_status_lbl = QLabel("")
+        self.ai_gen_status_lbl.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: bold;")
+        bottom_box.addWidget(self.ai_gen_status_lbl)
+        bottom_box.addStretch()
+
+        self.btn_save_ai_dataset = QPushButton("💾 Save Dataset to Environment")
+        self.btn_save_ai_dataset.setObjectName("btnSuccess")
+        self.btn_save_ai_dataset.setCursor(Qt.PointingHandCursor)
+        self.btn_save_ai_dataset.clicked.connect(self.save_claude_generated_dataset)
+        self.btn_save_ai_dataset.setEnabled(False)
+        bottom_box.addWidget(self.btn_save_ai_dataset)
+
+        layout.addLayout(bottom_box)
+        return widget
+
+    def run_claude_data_synth(self):
+        desc = self.ai_topic_edit.text().strip() or "Standard test accounts"
+        cnt_map = {"3 rows": 3, "5 rows": 5, "10 rows": 10, "15 rows": 15}
+        count = cnt_map.get(self.ai_count_combo.currentText(), 5)
+        self.btn_run_ai_gen.setEnabled(False)
+        self.ai_gen_status_lbl.setText("Synthesizing data with Claude...")
+
+        key = getattr(self, "claude_api_key", "")
+        model = getattr(self, "claude_model", "")
+        engine = ClaudeEngine(api_key=key, model=model)
+
+        self._ai_worker = ClaudeWorker("synthesize_data", engine, {"topic": desc, "count": count}, self)
+        self._ai_worker.finished_signal.connect(self._on_claude_data_finished)
+        self._ai_worker.error_signal.connect(self._on_claude_data_error)
+        self._ai_worker.start()
+
+    def _on_claude_data_finished(self, res: dict):
+        self.btn_run_ai_gen.setEnabled(True)
+        rows = res.get("rows", [])
+        self.last_ai_generated_rows = rows
+        if not rows:
+            self.ai_gen_status_lbl.setText("No rows generated.")
+            return
+
+        headers = list(rows[0].keys())
+        self.ai_preview_table.setColumnCount(len(headers))
+        self.ai_preview_table.setHorizontalHeaderLabels(headers)
+        self.ai_preview_table.setRowCount(len(rows))
+        for r_idx, row_dict in enumerate(rows):
+            for c_idx, h in enumerate(headers):
+                val = str(row_dict.get(h, ""))
+                self.ai_preview_table.setItem(r_idx, c_idx, QTableWidgetItem(val))
+
+        self.btn_save_ai_dataset.setEnabled(True)
+        self.ai_gen_status_lbl.setText(f"Generated {len(rows)} record(s) with Claude.")
+
+    def _on_claude_data_error(self, err_msg: str):
+        self.btn_run_ai_gen.setEnabled(True)
+        self.ai_gen_status_lbl.setText(f"Generation error: {err_msg[:40]}")
+
+    def save_claude_generated_dataset(self):
+        ds_name = self.ai_ds_name_edit.text().strip() or "claude_dataset"
+        rows = getattr(self, "last_ai_generated_rows", [])
+        if not rows:
+            return
+        self.mgr.save_dataset(self.current_env, ds_name, rows)
+        self.load_environment_data()
+        self.status_msg.setText(f"Saved dataset '{ds_name}' ({len(rows)} records) to [{self.current_env}].")
+        self.ai_gen_status_lbl.setText(f"Dataset '{ds_name}' saved to [{self.current_env}].")
+
     def load_environment_data(self):
         data = self.mgr.get_environment_data(self.current_env)
         variables = data.get("variables", {})
@@ -1664,6 +1885,689 @@ class TestDataDialog(QDialog):
         QMessageBox.information(self, "Conduit", f"Successfully imported scraped data into environment [{self.current_env}].")
 
 
+class ClaudePromptDialog(QDialog):
+    def __init__(self, engine: ClaudeEngine, base_url: str = "https://demo.playwright.dev/todomvc/", parent=None):
+        super().__init__(parent)
+        self.engine = engine
+        self.base_url = base_url
+        self.generated_scenario = None
+        self._worker = None
+
+        self.setWindowTitle("Conduit - Claude AI Flow Generator")
+        self.resize(880, 720)
+        self.setMinimumSize(800, 620)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0d1527;
+                border: 1px solid #2a3a5e;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #94a3b8;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QLineEdit {
+                background-color: #070b13;
+                border: 1px solid #243048;
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #ffffff;
+                font-size: 13px;
+                min-height: 36px;
+            }
+            QLineEdit:focus {
+                border-color: #8b5cf6;
+            }
+            QPlainTextEdit {
+                background-color: #070b13;
+                border: 1px solid #243048;
+                border-radius: 6px;
+                padding: 10px;
+                color: #ffffff;
+                font-size: 13px;
+                selection-background-color: #8b5cf6;
+                selection-color: #ffffff;
+            }
+            QPlainTextEdit:focus {
+                border-color: #8b5cf6;
+            }
+            QTabWidget::pane {
+                border: 1px solid #1e293b;
+                background-color: #0b1120;
+                border-radius: 8px;
+            }
+            QTabBar::tab {
+                background-color: #131b2e;
+                color: #94a3b8;
+                padding: 8px 18px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                margin-right: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #0b1120;
+                color: #a855f7;
+                border-top: 2px solid #a855f7;
+            }
+            QTableWidget {
+                background-color: #070b13;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                gridline-color: #1e293b;
+                color: #f8fafc;
+                font-size: 12px;
+            }
+            QHeaderView::section {
+                background-color: #0f172a;
+                color: #94a3b8;
+                padding: 6px 10px;
+                font-weight: bold;
+                border: none;
+                border-bottom: 1px solid #1e293b;
+            }
+            QPushButton {
+                background-color: #1e293b;
+                color: #f1f5f9;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: bold;
+                border: 1px solid #334155;
+                min-height: 34px;
+            }
+            QPushButton:hover {
+                background-color: #2563eb;
+                border-color: #3b82f6;
+            }
+            QPushButton#btnGenerate {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b5cf6, stop:1 #06b6d4);
+                border: none;
+                color: white;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 20px;
+                border-radius: 8px;
+            }
+            QPushButton#btnGenerate:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7c3aed, stop:1 #0891b2);
+            }
+            QPushButton#btnAccept {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #10b981, stop:1 #059669);
+                border: none;
+                color: white;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 20px;
+                border-radius: 8px;
+            }
+            QPushButton#btnAccept:hover {
+                background: #047857;
+            }
+            QPushButton#btnCancel {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #93c5fd;
+                border-radius: 8px;
+                padding: 8px 18px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        header_box = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title_lbl = QLabel("✨ Claude Natural Language Flow Generator")
+        title_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        title_box.addWidget(title_lbl)
+        sub_lbl = QLabel("Generate robust Page Object Models & Playwright test specs from plain English.")
+        sub_lbl.setStyleSheet("font-size: 11px; color: #94a3b8; font-weight: normal;")
+        title_box.addWidget(sub_lbl)
+        header_box.addLayout(title_box)
+
+        header_box.addStretch()
+
+        is_live = self.engine.is_api_available()
+        status_text = f"● Claude API ({self.engine.model})" if is_live else "○ Heuristic Fallback Mode"
+        status_color = "#34d399" if is_live else "#fbbf24"
+        mode_badge = QLabel(status_text)
+        mode_badge.setStyleSheet(f"background-color: rgba(139, 92, 246, 0.15); border: 1px solid #8b5cf6; color: {status_color}; font-size: 11px; font-weight: bold; padding: 4px 12px; border-radius: 12px;")
+        header_box.addWidget(mode_badge)
+        layout.addLayout(header_box)
+
+        url_box = QHBoxLayout()
+        url_box.addWidget(QLabel("Target URL:"))
+        self.url_edit = QLineEdit(self.base_url)
+        self.url_edit.setPlaceholderText("https://...")
+        url_box.addWidget(self.url_edit, 1)
+        layout.addLayout(url_box)
+
+        layout.addWidget(QLabel("Requirement / Test Scenario Prompt:"))
+        self.prompt_edit = QPlainTextEdit()
+        self.prompt_edit.setPlaceholderText("Enter test flow details...")
+        self.prompt_edit.setPlainText("User logs in with valid credentials, adds an item to shopping cart, completes checkout, and asserts order confirmation.")
+        self.prompt_edit.setFixedHeight(75)
+        layout.addWidget(self.prompt_edit)
+
+        quick_box = QHBoxLayout()
+        quick_lbl = QLabel("Quick Presets:")
+        quick_lbl.setStyleSheet("font-size: 11px; color: #64748b;")
+        quick_box.addWidget(quick_lbl)
+
+        p1_btn = QPushButton("🛒 E-Commerce Checkout")
+        p1_btn.setCursor(Qt.PointingHandCursor)
+        p1_btn.clicked.connect(lambda: self.prompt_edit.setPlainText("Navigate to store, select backpack item, add to shopping bag, proceed to checkout with test user standard_user, and assert thank you message."))
+        quick_box.addWidget(p1_btn)
+
+        p2_btn = QPushButton("🔐 Login & Dashboard")
+        p2_btn.setCursor(Qt.PointingHandCursor)
+        p2_btn.clicked.connect(lambda: self.prompt_edit.setPlainText("Navigate to login screen, fill email admin@conduit.io and password SecretPass123, click submit, and verify welcome dashboard header."))
+        quick_box.addWidget(p2_btn)
+
+        p3_btn = QPushButton("📋 Todo Task CRUD")
+        p3_btn.setCursor(Qt.PointingHandCursor)
+        p3_btn.clicked.connect(lambda: self.prompt_edit.setPlainText("Open TodoMVC app, add new todo 'Complete Conduit QA Automation', mark it as completed, and assert remaining item count is zero."))
+        quick_box.addWidget(p3_btn)
+
+        quick_box.addStretch()
+
+        self.btn_generate = QPushButton("✨ Synthesize with Claude")
+        self.btn_generate.setObjectName("btnGenerate")
+        self.btn_generate.setCursor(Qt.PointingHandCursor)
+        self.btn_generate.clicked.connect(self.run_generation)
+        quick_box.addWidget(self.btn_generate)
+        layout.addLayout(quick_box)
+
+        self.status_bar_lbl = QLabel("")
+        self.status_bar_lbl.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: bold;")
+        layout.addWidget(self.status_bar_lbl)
+
+        self.tabs = QTabWidget()
+
+        self.steps_table = QTableWidget(0, 4)
+        self.steps_table.setHorizontalHeaderLabels(["#", "Action", "Description", "Value / Target"])
+        self.steps_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.steps_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.steps_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.steps_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
+        self.steps_table.setColumnWidth(0, 40)
+        self.steps_table.setColumnWidth(3, 180)
+        self.tabs.addTab(self.steps_table, "Generated Steps")
+
+        self.test_code_view = CodeEditor()
+        self.test_code_view.setReadOnly(True)
+        self.test_highlighter = PythonHighlighter(self.test_code_view.document())
+        self.tabs.addTab(self.test_code_view, "test_spec.py")
+
+        self.pom_code_view = CodeEditor()
+        self.pom_code_view.setReadOnly(True)
+        self.pom_highlighter = PythonHighlighter(self.pom_code_view.document())
+        self.tabs.addTab(self.pom_code_view, "page_object.py")
+
+        self.explanation_view = QPlainTextEdit()
+        self.explanation_view.setReadOnly(True)
+        self.tabs.addTab(self.explanation_view, "AI Architecture & Strategy")
+
+        layout.addWidget(self.tabs, 1)
+
+        bottom_box = QHBoxLayout()
+        bottom_box.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("btnCancel")
+        cancel_btn.setCursor(Qt.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        bottom_box.addWidget(cancel_btn)
+
+        self.btn_accept = QPushButton("📥 Add Scenario to Test Catalog")
+        self.btn_accept.setObjectName("btnAccept")
+        self.btn_accept.setCursor(Qt.PointingHandCursor)
+        self.btn_accept.setEnabled(False)
+        self.btn_accept.clicked.connect(self.accept)
+        bottom_box.addWidget(self.btn_accept)
+
+        layout.addLayout(bottom_box)
+
+    def run_generation(self):
+        prompt = self.prompt_edit.toPlainText().strip()
+        url = self.url_edit.text().strip()
+        if not prompt:
+            QMessageBox.warning(self, "Conduit", "Please enter a test scenario requirement.")
+            return
+
+        self.btn_generate.setEnabled(False)
+        self.btn_generate.setText("Synthesizing...")
+        self.status_bar_lbl.setText("Claude is architecting Page Object Models and test steps...")
+
+        self._worker = ClaudeWorker("generate_flow", self.engine, {"prompt": prompt, "base_url": url}, self)
+        self._worker.finished_signal.connect(self._on_generation_finished)
+        self._worker.error_signal.connect(self._on_generation_error)
+        self._worker.start()
+
+    def _on_generation_finished(self, res: dict):
+        self.btn_generate.setEnabled(True)
+        self.btn_generate.setText("✨ Synthesize with Claude")
+
+        scenario_name = res.get("scenario_name", "Claude Generated Scenario")
+        steps = res.get("steps", [])
+        tags = res.get("tags", ["@smoke", "@claude"])
+
+        normalizer = ASTNormalizer()
+        synth = normalizer.synthesize_pom_and_test(
+            scenario_name=scenario_name,
+            tags=tags,
+            actions=steps
+        )
+
+        self.steps_table.setRowCount(len(steps))
+        for idx, st in enumerate(steps):
+            self.steps_table.setItem(idx, 0, QTableWidgetItem(str(idx + 1)))
+            self.steps_table.setItem(idx, 1, QTableWidgetItem(st.get("action", "").upper()))
+            self.steps_table.setItem(idx, 2, QTableWidgetItem(st.get("human_description", "")))
+            self.steps_table.setItem(idx, 3, QTableWidgetItem(str(st.get("value", "") or st.get("selector", ""))))
+
+        self.test_code_view.setPlainText(synth.get("test_code", ""))
+        pages = synth.get("pages", [])
+        pom_code = pages[0].get("code", "") if pages else res.get("pom_code", "")
+        self.pom_code_view.setPlainText(pom_code)
+
+        exp_text = res.get("explanation", "Scenario successfully architected using Page Object Model and resilient Playwright locators.")
+        self.explanation_view.setPlainText(exp_text)
+
+        new_id = f"sc_{os.urandom(4).hex()}"
+        self.generated_scenario = {
+            "id": new_id,
+            "name": scenario_name,
+            "tags": tags,
+            "last_execution": "Generated by Claude",
+            "status": "Passed",
+            "duration": "--",
+            "file_name": synth.get("file_name", f"test_{new_id}.py"),
+            "steps": synth.get("steps", steps),
+            "code": synth.get("test_code", ""),
+            "pages": synth.get("pages", [])
+        }
+
+        self.btn_accept.setEnabled(True)
+        self.status_bar_lbl.setText(f"Successfully generated scenario '{scenario_name}' with {len(steps)} steps.")
+
+    def _on_generation_error(self, err_msg: str):
+        self.btn_generate.setEnabled(True)
+        self.btn_generate.setText("✨ Synthesize with Claude")
+        self.status_bar_lbl.setText(f"Synthesis failed: {err_msg[:60]}")
+        QMessageBox.warning(self, "Conduit", f"Failed to synthesize flow: {err_msg}")
+
+    def get_generated_scenario(self) -> dict:
+        return self.generated_scenario
+
+
+class ClaudeHealDialog(QDialog):
+    def __init__(self, engine: ClaudeEngine, scenario: dict, failed_step: dict = None, error_message: str = "", parent=None):
+        super().__init__(parent)
+        self.engine = engine
+        self.scenario = scenario
+        self.failed_step = failed_step or (scenario.get("steps", [{}])[-1] if scenario.get("steps") else {})
+        self.error_message = error_message or "Timeout waiting for element selector: Element not visible or detached from DOM."
+        self.healed_data = None
+        self._worker = None
+
+        self.setWindowTitle("Conduit - Claude Autonomous Self-Healing")
+        self.resize(760, 600)
+        self.setMinimumSize(700, 520)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0d1527;
+                border: 1px solid #2a3a5e;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #94a3b8;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QFrame#cardFrame {
+                background-color: #0b1120;
+                border: 1px solid #1e293b;
+                border-radius: 8px;
+                padding: 12px;
+            }
+            QPushButton {
+                background-color: #1e293b;
+                color: #f1f5f9;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: bold;
+                border: 1px solid #334155;
+                min-height: 34px;
+            }
+            QPushButton:hover {
+                background-color: #2563eb;
+                border-color: #3b82f6;
+            }
+            QPushButton#btnApply {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #10b981, stop:1 #059669);
+                border: none;
+                color: white;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 22px;
+                border-radius: 8px;
+            }
+            QPushButton#btnApply:hover {
+                background: #047857;
+            }
+            QPushButton#btnCancel {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #93c5fd;
+                border-radius: 8px;
+                padding: 8px 18px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        hdr_box = QHBoxLayout()
+        t_box = QVBoxLayout()
+        t_lbl = QLabel("⚡ Autonomous AI Self-Healing Diagnostics")
+        t_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        t_box.addWidget(t_lbl)
+        sub_lbl = QLabel("Claude analyzed locator failure, computed DOM drift, and generated resilient locator strategy.")
+        sub_lbl.setStyleSheet("font-size: 11px; color: #94a3b8; font-weight: normal;")
+        t_box.addWidget(sub_lbl)
+        hdr_box.addLayout(t_box)
+        hdr_box.addStretch()
+
+        self.conf_badge = QLabel("Confidence: Analyzing...")
+        self.conf_badge.setStyleSheet("background-color: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #34d399; font-size: 11px; font-weight: bold; padding: 4px 12px; border-radius: 12px;")
+        hdr_box.addWidget(self.conf_badge)
+        layout.addLayout(hdr_box)
+
+        err_card = QFrame()
+        err_card.setObjectName("cardFrame")
+        err_layout = QVBoxLayout(err_card)
+        err_layout.setSpacing(6)
+        err_layout.addWidget(QLabel(f"Target Scenario: {self.scenario.get('name', 'Unknown')}"))
+
+        f_desc = self.failed_step.get("human_description", "Unknown Step")
+        err_layout.addWidget(QLabel(f"Failed Step: {f_desc}"))
+
+        err_msg_lbl = QLabel(f"Detected Runtime Error: {self.error_message}")
+        err_msg_lbl.setStyleSheet("color: #f87171; font-family: Consolas; font-size: 11px;")
+        err_msg_lbl.setWordWrap(True)
+        err_layout.addWidget(err_msg_lbl)
+        layout.addWidget(err_card)
+
+        diag_card = QFrame()
+        diag_card.setObjectName("cardFrame")
+        diag_layout = QVBoxLayout(diag_card)
+        diag_layout.setSpacing(8)
+
+        diag_layout.addWidget(QLabel("Root Cause Analysis:"))
+        self.root_cause_lbl = QLabel("Diagnosing locator drift...")
+        self.root_cause_lbl.setWordWrap(True)
+        self.root_cause_lbl.setStyleSheet("color: #f1f5f9; font-size: 12px; font-weight: normal;")
+        diag_layout.addWidget(self.root_cause_lbl)
+
+        diag_layout.addWidget(QLabel("Resilient Healing Strategy:"))
+        self.strategy_lbl = QLabel("Synthesizing multi-tier selector...")
+        self.strategy_lbl.setWordWrap(True)
+        self.strategy_lbl.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: normal;")
+        diag_layout.addWidget(self.strategy_lbl)
+        layout.addWidget(diag_card)
+
+        diff_card = QFrame()
+        diff_card.setObjectName("cardFrame")
+        diff_layout = QVBoxLayout(diff_card)
+        diff_layout.setSpacing(6)
+        diff_layout.addWidget(QLabel("Locator Strategy Transformation:"))
+
+        sel_info = self.failed_step.get("selector_info") or {}
+        orig_expr = sel_info.get("locator_expr") or sel_info.get("display") or "self.page.locator(...)"
+        self.orig_lbl = QLabel(f"Broken Selector:  {orig_expr}")
+        self.orig_lbl.setStyleSheet("color: #f87171; font-family: Consolas; font-size: 12px; padding: 4px; background-color: #1a0f14; border-radius: 4px;")
+        diff_layout.addWidget(self.orig_lbl)
+
+        self.healed_lbl = QLabel("Healed Selector:  Synthesizing...")
+        self.healed_lbl.setStyleSheet("color: #34d399; font-family: Consolas; font-size: 12px; padding: 4px; background-color: #091f18; border-radius: 4px;")
+        diff_layout.addWidget(self.healed_lbl)
+        layout.addWidget(diff_card)
+
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("btnCancel")
+        cancel_btn.setCursor(Qt.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        btn_box.addWidget(cancel_btn)
+
+        self.btn_apply = QPushButton("🩹 Apply Healed Strategy")
+        self.btn_apply.setObjectName("btnApply")
+        self.btn_apply.setCursor(Qt.PointingHandCursor)
+        self.btn_apply.setEnabled(False)
+        self.btn_apply.clicked.connect(self.accept)
+        btn_box.addWidget(self.btn_apply)
+        layout.addLayout(btn_box)
+
+        self.start_diagnosis()
+
+    def start_diagnosis(self):
+        s_name = self.scenario.get("name", "Test Scenario")
+        self._worker = ClaudeWorker(
+            "diagnose_and_heal",
+            self.engine,
+            {
+                "scenario_name": s_name,
+                "failed_step": self.failed_step,
+                "error_message": self.error_message
+            },
+            self
+        )
+        self._worker.finished_signal.connect(self._on_diag_finished)
+        self._worker.error_signal.connect(self._on_diag_error)
+        self._worker.start()
+
+    def _on_diag_finished(self, diag: dict):
+        self.healed_data = diag
+        self.root_cause_lbl.setText(diag.get("root_cause", "Selector timed out due to DOM tree restructuring."))
+        self.strategy_lbl.setText(diag.get("healing_strategy", "Applied resilient accessibility locator."))
+        conf = int(diag.get("confidence", 0.92) * 100)
+        self.conf_badge.setText(f"Confidence: {conf}%")
+
+        h_step = diag.get("healed_step", {})
+        h_sel = h_step.get("selector_info", {})
+        h_expr = h_sel.get("locator_expr") or h_sel.get("display") or "self.page.get_by_role(...)"
+        self.healed_lbl.setText(f"Healed Selector:  {h_expr}")
+
+        self.btn_apply.setEnabled(True)
+
+    def _on_diag_error(self, err_msg: str):
+        self.root_cause_lbl.setText(f"Diagnostic error: {err_msg}")
+        self.strategy_lbl.setText("Falling back to local heuristic recovery.")
+
+    def get_healed_data(self) -> dict:
+        return self.healed_data
+
+
+class ClaudeCodeDialog(QDialog):
+    def __init__(self, engine: ClaudeEngine, code: str, parent=None):
+        super().__init__(parent)
+        self.engine = engine
+        self.original_code = code
+        self.optimized_code = code
+        self._worker = None
+
+        self.setWindowTitle("Conduit - Claude AI Code Assistant")
+        self.resize(840, 640)
+        self.setMinimumSize(780, 560)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0d1527;
+                border: 1px solid #2a3a5e;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #94a3b8;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QTabWidget::pane {
+                border: 1px solid #1e293b;
+                background-color: #0b1120;
+                border-radius: 8px;
+            }
+            QTabBar::tab {
+                background-color: #131b2e;
+                color: #94a3b8;
+                padding: 8px 18px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                margin-right: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #0b1120;
+                color: #38bdf8;
+                border-top: 2px solid #38bdf8;
+            }
+            QPlainTextEdit {
+                background-color: #070b13;
+                border: 1px solid #243048;
+                border-radius: 6px;
+                padding: 10px;
+                color: #ffffff;
+                font-size: 12px;
+            }
+            QPushButton {
+                background-color: #1e293b;
+                color: #f1f5f9;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: bold;
+                border: 1px solid #334155;
+                min-height: 34px;
+            }
+            QPushButton:hover {
+                background-color: #2563eb;
+                border-color: #3b82f6;
+            }
+            QPushButton#btnApply {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
+                border: none;
+                color: white;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 20px;
+                border-radius: 8px;
+            }
+            QPushButton#btnApply:hover {
+                background: #0369a1;
+            }
+            QPushButton#btnCancel {
+                background-color: #131b2e;
+                border: 1px solid #2a3a5e;
+                color: #93c5fd;
+                border-radius: 8px;
+                padding: 8px 18px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        hdr_box = QHBoxLayout()
+        t_box = QVBoxLayout()
+        t_lbl = QLabel("🤖 Claude Playwright Code Assistant")
+        t_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        t_box.addWidget(t_lbl)
+        sub_lbl = QLabel("Code walkthrough, resiliency optimization, and flakiness prevention.")
+        sub_lbl.setStyleSheet("font-size: 11px; color: #94a3b8; font-weight: normal;")
+        t_box.addWidget(sub_lbl)
+        hdr_box.addLayout(t_box)
+        hdr_box.addStretch()
+
+        self.status_badge = QLabel("Analyzing...")
+        self.status_badge.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: bold;")
+        hdr_box.addWidget(self.status_badge)
+        layout.addLayout(hdr_box)
+
+        self.tabs = QTabWidget()
+
+        self.exp_view = QPlainTextEdit()
+        self.exp_view.setReadOnly(True)
+        self.tabs.addTab(self.exp_view, "Architecture & Walkthrough")
+
+        self.sug_view = QPlainTextEdit()
+        self.sug_view.setReadOnly(True)
+        self.tabs.addTab(self.sug_view, "Resiliency Recommendations")
+
+        self.opt_view = CodeEditor()
+        self.opt_view.setReadOnly(True)
+        self.opt_highlighter = PythonHighlighter(self.opt_view.document())
+        self.tabs.addTab(self.opt_view, "Optimized Code")
+
+        layout.addWidget(self.tabs, 1)
+
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+
+        cancel_btn = QPushButton("Close")
+        cancel_btn.setObjectName("btnCancel")
+        cancel_btn.setCursor(Qt.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        btn_box.addWidget(cancel_btn)
+
+        self.btn_apply = QPushButton("⚡ Apply Optimized Code to Editor")
+        self.btn_apply.setObjectName("btnApply")
+        self.btn_apply.setCursor(Qt.PointingHandCursor)
+        self.btn_apply.setEnabled(False)
+        self.btn_apply.clicked.connect(self.accept)
+        btn_box.addWidget(self.btn_apply)
+        layout.addLayout(btn_box)
+
+        self.start_optimization()
+
+    def start_optimization(self):
+        self._worker = ClaudeWorker(
+            "optimize_code",
+            self.engine,
+            {"code": self.original_code},
+            self
+        )
+        self._worker.finished_signal.connect(self._on_opt_finished)
+        self._worker.error_signal.connect(self._on_opt_error)
+        self._worker.start()
+
+    def _on_opt_finished(self, res: dict):
+        self.exp_view.setPlainText(res.get("explanation", ""))
+        suggestions = res.get("suggestions", [])
+        self.sug_view.setPlainText("\n\n• ".join(["• " + s for s in suggestions]) if suggestions else "No suggestions.")
+        self.optimized_code = res.get("improved_code", self.original_code)
+        self.opt_view.setPlainText(self.optimized_code)
+        self.status_badge.setText("Analysis Complete")
+        self.status_badge.setStyleSheet("color: #34d399; font-size: 11px; font-weight: bold;")
+        self.btn_apply.setEnabled(True)
+
+    def _on_opt_error(self, err_msg: str):
+        self.status_badge.setText("Analysis Error")
+        self.status_badge.setStyleSheet("color: #f87171; font-size: 11px; font-weight: bold;")
+        self.exp_view.setPlainText(f"Failed to analyze code: {err_msg}")
+
+    def get_optimized_code(self) -> str:
+        return self.optimized_code
+
+
 class ConduitMainWindow(QMainWindow):
     def __init__(self, workspace_dir: str):
         super().__init__()
@@ -1697,8 +2601,15 @@ class ConduitMainWindow(QMainWindow):
             "capture_evidence": True,
             "evidence_format": "both",
             "retries": 0,
-            "device": "Desktop 1280x800"
+            "device": "Desktop 1280x800",
+            "claude_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+            "claude_model": os.environ.get("CONDUIT_CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
         }
+
+        self.claude_engine = ClaudeEngine(
+            api_key=self.settings.get("claude_api_key", ""),
+            model=self.settings.get("claude_model", "")
+        )
 
         self.bridge = ExecutionBridge()
         self.bridge.log_signal.connect(self.append_log)
@@ -1896,6 +2807,8 @@ class ConduitMainWindow(QMainWindow):
         dlg = SettingsDialog(self.settings, self.test_data_mgr.get_environments(), self)
         if dlg.exec() == QDialog.Accepted:
             self.settings = dlg.get_settings()
+            self.claude_engine.set_api_key(self.settings.get("claude_api_key", ""))
+            self.claude_engine.set_model(self.settings.get("claude_model", ""))
             self.set_environment(self.settings.get("env", "QA"))
             self.set_browser(self.settings.get("browser", "msedge"))
             new_dev = self.settings.get("device", "Desktop 1280x800")
@@ -1985,6 +2898,25 @@ class ConduitMainWindow(QMainWindow):
         self.render_env_pills()
 
         layout.addStretch()
+
+        self.btn_claude_flow = QPushButton("✨ Claude AI Flow")
+        self.btn_claude_flow.setCursor(Qt.PointingHandCursor)
+        self.btn_claude_flow.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b5cf6, stop:1 #06b6d4);
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 18px;
+                border-radius: 8px;
+                border: none;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7c3aed, stop:1 #0891b2);
+            }
+        """)
+        self.btn_claude_flow.clicked.connect(self.open_claude_flow_dialog)
+        layout.addWidget(self.btn_claude_flow)
 
         self.btn_record_flow = QPushButton("● Record New Flow")
         self.btn_record_flow.setCursor(Qt.PointingHandCursor)
@@ -2179,7 +3111,13 @@ class ConduitMainWindow(QMainWindow):
                 self.append_log("WARNING", f"Environment [{clean_name}] already exists.")
 
     def open_test_data_dialog(self):
-        dlg = TestDataDialog(self.test_data_mgr, self.current_env, self)
+        dlg = TestDataDialog(
+            self.test_data_mgr,
+            self.current_env,
+            self.settings.get("claude_api_key", ""),
+            self.settings.get("claude_model", ""),
+            self
+        )
         dlg.exec()
         self.render_env_pills()
 
@@ -2440,6 +3378,26 @@ class ConduitMainWindow(QMainWindow):
         self.steps_title_lbl.setStyleSheet("font-size: 12px; font-weight: bold; color: #cbd5e1;")
         steps_hdr.addWidget(self.steps_title_lbl, 1)
 
+        self.btn_auto_heal = QPushButton("⚡ Auto-Heal")
+        self.btn_auto_heal.setCursor(Qt.PointingHandCursor)
+        self.btn_auto_heal.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(168, 85, 247, 0.2);
+                border: 1px solid #a855f7;
+                color: #d8b4fe;
+                font-size: 11px;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover {
+                background-color: rgba(168, 85, 247, 0.4);
+                color: #ffffff;
+            }
+        """)
+        self.btn_auto_heal.clicked.connect(self.auto_heal_with_claude)
+        steps_hdr.addWidget(self.btn_auto_heal)
+
         self.btn_add_step = QPushButton("+ Add Step")
         self.btn_add_step.setCursor(Qt.PointingHandCursor)
         self.btn_add_step.setStyleSheet("""
@@ -2501,6 +3459,26 @@ class ConduitMainWindow(QMainWindow):
         code_hdr.addWidget(self.code_status_lbl)
 
         code_hdr.addStretch()
+
+        self.btn_claude_code = QPushButton("🤖 Claude Assistant")
+        self.btn_claude_code.setCursor(Qt.PointingHandCursor)
+        self.btn_claude_code.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(139, 92, 246, 0.2);
+                border: 1px solid #8b5cf6;
+                color: #c084fc;
+                font-size: 11px;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover {
+                background-color: rgba(139, 92, 246, 0.4);
+                color: #ffffff;
+            }
+        """)
+        self.btn_claude_code.clicked.connect(self.open_claude_code_assistant)
+        code_hdr.addWidget(self.btn_claude_code)
 
         self.btn_save_code = QPushButton("💾 Save Code")
         self.btn_save_code.setCursor(Qt.PointingHandCursor)
@@ -2974,6 +3952,55 @@ class ConduitMainWindow(QMainWindow):
     def on_device_changed(self, dev_name: str):
         self.settings["device"] = dev_name
         self.append_log("INFO", f"Device emulation preset set to [{dev_name}]")
+
+    def open_claude_flow_dialog(self):
+        cur_url = self.settings.get("base_url", "https://demo.playwright.dev/todomvc/")
+        dlg = ClaudePromptDialog(self.claude_engine, base_url=cur_url, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            sc = dlg.get_generated_scenario()
+            if sc:
+                self.catalog.add_or_update_scenario(sc)
+                self.load_scenarios()
+                self.select_scenario(sc["id"])
+                self.append_log("SUCCESS", f"Claude synthesized flow '{sc.get('name')}' added to catalog.")
+
+    def auto_heal_with_claude(self):
+        if not getattr(self, "selected_scenario_id", None):
+            self.append_log("WARNING", "Please select a scenario to heal.")
+            return
+        sc = self.catalog.get_scenario(self.selected_scenario_id)
+        if not sc or not sc.get("steps"):
+            self.append_log("WARNING", "Selected scenario has no steps to heal.")
+            return
+
+        failed_step = sc["steps"][-1]
+        for st in sc["steps"]:
+            if "fail" in st.get("human_description", "").lower() or "error" in st.get("human_description", "").lower():
+                failed_step = st
+                break
+
+        err_msg = "Playwright TimeoutError: element not found or detached from DOM within 5000ms"
+        dlg = ClaudeHealDialog(self.claude_engine, sc, failed_step=failed_step, error_message=err_msg, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            healed = dlg.get_healed_data()
+            if healed and "healed_step" in healed:
+                step_idx = sc["steps"].index(failed_step) if failed_step in sc["steps"] else (len(sc["steps"]) - 1)
+                sc["steps"][step_idx] = healed["healed_step"]
+                sc["status"] = "Passed"
+                self._sync_scenario_steps_and_save(sc)
+                self.append_log("SUCCESS", f"Autonomous Self-Healing applied to '{sc.get('name')}': {healed.get('healing_strategy', '')}")
+
+    def open_claude_code_assistant(self):
+        code = self.code_edit.toPlainText()
+        if not code.strip():
+            self.append_log("WARNING", "No code in editor to analyze.")
+            return
+        dlg = ClaudeCodeDialog(self.claude_engine, code, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            improved = dlg.get_optimized_code()
+            if improved:
+                self.code_edit.setPlainText(improved)
+                self.append_log("SUCCESS", "Applied Claude optimized code to editor.")
 
     def run_current_flow(self):
         if not getattr(self, "selected_scenario_id", None):

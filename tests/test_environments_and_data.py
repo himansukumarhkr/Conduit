@@ -104,6 +104,6 @@ def test_test_data_dialog_initialization():
         mgr = TestDataManager(tmp)
         from app.ui.main_window import TestDataDialog
         dlg = TestDataDialog(mgr, "QA")
-        assert dlg.tabs.count() == 3
+        assert dlg.tabs.count() == 4
         assert dlg.var_table.rowCount() > 0
         dlg.close()

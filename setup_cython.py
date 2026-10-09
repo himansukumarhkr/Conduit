@@ -12,6 +12,7 @@ modules = [
     "app/core/evidence_manager.py",
     "app/core/test_data_manager.py",
     "app/core/report_generator.py",
+    "app/core/claude_engine.py",
     "app/ui/main_window.py"
 ]
 
