@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QStyledItemDelegate, QPlainTextEdit, QScrollArea, QFrame, QDialog,
     QLineEdit, QCheckBox, QProgressBar, QSplitter, QSizePolicy, QComboBox, QStyle,
-    QTabWidget, QInputDialog, QMessageBox
+    QTabWidget, QInputDialog, QMessageBox, QFileDialog
 )
 import ast
 
@@ -27,6 +27,7 @@ from app.core.recorder import BrowserRecorder
 from app.core.runner import TestRunner
 from app.core.test_data_manager import TestDataManager
 from app.core.claude_engine import ClaudeEngine
+from app.core.migration_engine import SeleniumJavaMigrationEngine
 
 
 class CodeEditor(QPlainTextEdit):
@@ -819,6 +820,19 @@ class SettingsDialog(QDialog):
         self.retries_combo.setCurrentIndex(retries_map.get(cur_retries, 0))
         layout.addWidget(self.retries_combo)
 
+        layout.addWidget(QLabel("Parallel Execution (Local Workers)"))
+        self.workers_combo = QComboBox()
+        self.workers_combo.addItems([
+            "1 Worker (Sequential)",
+            "2 Workers (Parallel)",
+            "4 Workers (Parallel)",
+            "Auto (CPU Cores)"
+        ])
+        cur_w = self.settings_data.get("workers", 1)
+        w_map = {1: 0, 2: 1, 4: 2, "auto": 3}
+        self.workers_combo.setCurrentIndex(w_map.get(cur_w, 0))
+        layout.addWidget(self.workers_combo)
+
         layout.addWidget(QLabel("Device Emulation / Viewport Preset"))
         self.device_combo = QComboBox()
         self.device_combo.addItems([
@@ -941,6 +955,9 @@ class SettingsDialog(QDialog):
         r_idx = self.retries_combo.currentIndex()
         retries_vals = [0, 1, 2, 3, 5]
         self.settings_data["retries"] = retries_vals[r_idx] if r_idx < len(retries_vals) else 0
+        w_idx = self.workers_combo.currentIndex()
+        w_vals = [1, 2, 4, "auto"]
+        self.settings_data["workers"] = w_vals[w_idx] if w_idx < len(w_vals) else 1
         self.settings_data["device"] = self.device_combo.currentText()
         self.settings_data["claude_api_key"] = self.claude_key_edit.text().strip()
         self.settings_data["claude_model"] = self.claude_model_combo.currentText()
@@ -1190,6 +1207,18 @@ class ClaudeWorker(QThread):
             elif self.task_type == "test_connection":
                 ok, msg = self.engine.test_connection()
                 self.finished_signal.emit({"success": ok, "message": msg})
+            elif self.task_type == "migrate_java":
+                res = self.engine.migrate_selenium_java_to_playwright(
+                    java_code=self.params.get("code", ""),
+                    class_type=self.params.get("class_type", "auto")
+                )
+                self.finished_signal.emit(res)
+            elif self.task_type == "scan_java":
+                mig_engine = SeleniumJavaMigrationEngine()
+                res = mig_engine.scan_java_directory(
+                    dir_path=self.params.get("dir_path", "")
+                )
+                self.finished_signal.emit(res)
         except Exception as e:
             self.error_signal.emit(str(e))
 
@@ -2568,6 +2597,462 @@ class ClaudeCodeDialog(QDialog):
         return self.optimized_code
 
 
+class MigrationDialog(QDialog):
+    __test__ = False
+
+    def __init__(self, catalog_mgr: CatalogManager, claude_engine: ClaudeEngine, parent=None):
+        super().__init__(parent)
+        self.catalog = catalog_mgr
+        self.engine = claude_engine
+        self.mig_engine = SeleniumJavaMigrationEngine()
+        self.scanned_files: List[Dict[str, Any]] = []
+        self.transpiled_cache: Dict[str, Dict[str, Any]] = {}
+        self._worker = None
+
+        self.setWindowTitle("Conduit - Selenium Java to Playwright Migration Studio")
+        self.resize(1120, 720)
+        self.setMinimumSize(960, 600)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0d1527;
+                border: 1px solid #2a3a5e;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #94a3b8;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QLineEdit {
+                background-color: #070b13;
+                border: 1px solid #243048;
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #ffffff;
+                font-size: 13px;
+                min-height: 36px;
+            }
+            QLineEdit:focus {
+                border-color: #38bdf8;
+            }
+            QTableWidget {
+                background-color: #070b13;
+                border: 1px solid #1e293b;
+                border-radius: 8px;
+                color: #e2e8f0;
+                gridline-color: #1e293b;
+            }
+            QTableWidget::item:selected {
+                background-color: #1e293b;
+                color: #38bdf8;
+            }
+            QHeaderView::section {
+                background-color: #0d1527;
+                color: #94a3b8;
+                border: none;
+                border-bottom: 1px solid #1e293b;
+                padding: 6px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QTabWidget::pane {
+                border: 1px solid #1e293b;
+                background-color: #0b1120;
+                border-radius: 8px;
+            }
+            QTabBar::tab {
+                background-color: #131b2e;
+                color: #94a3b8;
+                padding: 8px 18px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                margin-right: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #0b1120;
+                color: #38bdf8;
+                border-top: 2px solid #38bdf8;
+            }
+            QPushButton {
+                background-color: #1e293b;
+                color: #f1f5f9;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: bold;
+                border: 1px solid #334155;
+                min-height: 34px;
+            }
+            QPushButton:hover {
+                background-color: #2563eb;
+                border-color: #3b82f6;
+            }
+            QPushButton#btnImport {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #059669, stop:1 #10b981);
+                color: white;
+                font-weight: bold;
+                border: none;
+                padding: 8px 20px;
+                border-radius: 8px;
+                min-height: 36px;
+            }
+            QPushButton#btnImport:hover {
+                background: #047857;
+            }
+            QPushButton#btnImport:disabled {
+                background: #1e293b;
+                color: #64748b;
+            }
+            QPushButton#btnTranspileAll {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
+                color: white;
+                font-weight: bold;
+                border: none;
+                padding: 8px 18px;
+                border-radius: 8px;
+                min-height: 36px;
+            }
+            QPushButton#btnTranspileAll:hover {
+                background: #0369a1;
+            }
+            QPushButton#btnSample {
+                background-color: #1e1b4b;
+                border: 1px solid #6366f1;
+                color: #a5b4fc;
+                font-weight: bold;
+                padding: 6px 14px;
+                border-radius: 6px;
+            }
+            QPushButton#btnSample:hover {
+                background-color: #312e81;
+                color: #ffffff;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
+
+        hdr_row = QHBoxLayout()
+        title_box = QVBoxLayout()
+        t_lbl = QLabel("🚀 Selenium Java to Playwright Migration Studio")
+        t_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        title_box.addWidget(t_lbl)
+        sub_lbl = QLabel("Transpile Selenium Page Objects & TestNG/JUnit tests to Python + Playwright with POM & assertions.")
+        sub_lbl.setStyleSheet("font-size: 11px; color: #94a3b8; font-weight: normal;")
+        title_box.addWidget(sub_lbl)
+        hdr_row.addLayout(title_box)
+        hdr_row.addStretch()
+
+        is_claude = self.engine.is_api_available()
+        status_text = "● Live Claude AI Active" if is_claude else "○ Offline Heuristic Transpiler Mode"
+        status_color = "#34d399" if is_claude else "#fbbf24"
+        self.claude_status_lbl = QLabel(status_text)
+        self.claude_status_lbl.setStyleSheet(f"color: {status_color}; font-size: 11px; font-weight: bold;")
+        hdr_row.addWidget(self.claude_status_lbl)
+        layout.addLayout(hdr_row)
+
+        scan_row = QHBoxLayout()
+        self.path_edit = QLineEdit()
+        self.path_edit.setPlaceholderText("Select Java framework directory (containing .java files)...")
+        scan_row.addWidget(self.path_edit, 1)
+
+        btn_browse = QPushButton("Browse...")
+        btn_browse.clicked.connect(self._browse_dir)
+        scan_row.addWidget(btn_browse)
+
+        btn_scan = QPushButton("📁 Scan Repo")
+        btn_scan.clicked.connect(self._scan_dir)
+        scan_row.addWidget(btn_scan)
+
+        btn_sample = QPushButton("⚡ Load Sample Java Project (Demo)")
+        btn_sample.setObjectName("btnSample")
+        btn_sample.clicked.connect(self._load_sample)
+        scan_row.addWidget(btn_sample)
+
+        layout.addLayout(scan_row)
+
+        splitter = QSplitter(Qt.Horizontal)
+
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(6)
+
+        left_hdr = QHBoxLayout()
+        self.files_count_lbl = QLabel("Scanned Files (0)")
+        left_hdr.addWidget(self.files_count_lbl)
+        left_hdr.addStretch()
+        left_layout.addLayout(left_hdr)
+
+        self.files_table = QTableWidget(0, 5)
+        self.files_table.setHorizontalHeaderLabels(["File Name", "Type", "Locators", "Methods", "Status"])
+        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.files_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.files_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.files_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.files_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.files_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.files_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.files_table.itemSelectionChanged.connect(self._on_file_selected)
+        left_layout.addWidget(self.files_table, 1)
+        splitter.addWidget(left_widget)
+
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(6)
+
+        preview_hdr = QHBoxLayout()
+        self.selected_file_lbl = QLabel("No file selected")
+        self.selected_file_lbl.setStyleSheet("color: #38bdf8; font-size: 13px; font-weight: bold;")
+        preview_hdr.addWidget(self.selected_file_lbl)
+        preview_hdr.addStretch()
+
+        self.btn_transpile_cur = QPushButton("⚡ Transpile This File")
+        self.btn_transpile_cur.setEnabled(False)
+        self.btn_transpile_cur.clicked.connect(self._transpile_selected)
+        preview_hdr.addWidget(self.btn_transpile_cur)
+        right_layout.addLayout(preview_hdr)
+
+        self.tabs = QTabWidget()
+
+        diff_widget = QWidget()
+        diff_layout = QHBoxLayout(diff_widget)
+        diff_layout.setContentsMargins(4, 4, 4, 4)
+        diff_layout.setSpacing(8)
+
+        left_diff = QVBoxLayout()
+        left_diff.addWidget(QLabel("Java Source (Selenium)"))
+        self.java_view = QPlainTextEdit()
+        self.java_view.setReadOnly(True)
+        self.java_view.setFont(QFont("Consolas", 10))
+        self.java_view.setStyleSheet("background-color: #070b13; border: 1px solid #1e293b; color: #cbd5e1; border-radius: 6px; padding: 6px;")
+        left_diff.addWidget(self.java_view, 1)
+        diff_layout.addLayout(left_diff, 1)
+
+        right_diff = QVBoxLayout()
+        right_diff.addWidget(QLabel("Python Playwright (Migrated)"))
+        self.python_view = CodeEditor()
+        self.py_highlighter = PythonHighlighter(self.python_view.document())
+        right_diff.addWidget(self.python_view, 1)
+        diff_layout.addLayout(right_diff, 1)
+
+        self.tabs.addTab(diff_widget, "Side-by-Side Comparison")
+
+        self.walkthrough_view = QPlainTextEdit()
+        self.walkthrough_view.setReadOnly(True)
+        self.walkthrough_view.setStyleSheet("background-color: #070b13; border: 1px solid #1e293b; color: #94a3b8; border-radius: 6px; padding: 10px; font-size: 12px;")
+        self.tabs.addTab(self.walkthrough_view, "Migration Architecture & Report")
+
+        right_layout.addWidget(self.tabs, 1)
+        splitter.addWidget(right_widget)
+
+        splitter.setSizes([380, 680])
+        layout.addWidget(splitter, 1)
+
+        bot_box = QHBoxLayout()
+        self.status_lbl = QLabel("Ready. Select a Java repository or load the demo project.")
+        bot_box.addWidget(self.status_lbl)
+
+        self.pbar = QProgressBar()
+        self.pbar.setFixedHeight(8)
+        self.pbar.setTextVisible(False)
+        self.pbar.setRange(0, 100)
+        self.pbar.setValue(0)
+        self.pbar.setStyleSheet("""
+            QProgressBar {
+                background-color: #1e293b;
+                border-radius: 4px;
+                border: none;
+            }
+            QProgressBar::chunk {
+                background-color: #38bdf8;
+                border-radius: 4px;
+            }
+        """)
+        bot_box.addWidget(self.pbar, 1)
+
+        self.btn_transpile_all = QPushButton("⚡ Transpile All Files")
+        self.btn_transpile_all.setObjectName("btnTranspileAll")
+        self.btn_transpile_all.setEnabled(False)
+        self.btn_transpile_all.clicked.connect(self._transpile_all)
+        bot_box.addWidget(self.btn_transpile_all)
+
+        self.btn_import = QPushButton("📥 Import to Conduit Catalog")
+        self.btn_import.setObjectName("btnImport")
+        self.btn_import.setEnabled(False)
+        self.btn_import.clicked.connect(self._import_all)
+        bot_box.addWidget(self.btn_import)
+
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(self.accept)
+        bot_box.addWidget(btn_close)
+
+        layout.addLayout(bot_box)
+
+    def _browse_dir(self):
+        d = QFileDialog.getExistingDirectory(self, "Select Selenium Java Framework Directory")
+        if d:
+            self.path_edit.setText(d)
+            self._scan_dir()
+
+    def _load_sample(self):
+        samples = self.mig_engine.get_sample_selenium_java_project()
+        self.scanned_files = []
+        for name, code in samples.items():
+            cls_type = self.mig_engine.classify_java_file(name, code)
+            locs = self.mig_engine._extract_locators(code)
+            meths = self.mig_engine._extract_methods(code)
+            self.scanned_files.append({
+                "file_name": name,
+                "file_path": f"sample:///{name}",
+                "class_name": self.mig_engine._extract_class_name(code, name),
+                "type": cls_type,
+                "locators_count": len(locs),
+                "methods_count": len(meths),
+                "content": code
+            })
+        self._populate_table()
+        self.status_lbl.setText("Loaded 3 sample Selenium Java files. Click 'Transpile All Files'.")
+
+    def _scan_dir(self):
+        d = self.path_edit.text().strip()
+        if not d or not os.path.exists(d):
+            self.status_lbl.setText("Directory does not exist.")
+            return
+        res = self.mig_engine.scan_java_directory(d)
+        all_items = res.get("page_objects", []) + res.get("tests", []) + res.get("utilities", [])
+        self.scanned_files = all_items
+        self._populate_table()
+        self.status_lbl.setText(f"Found {len(all_items)} Java files ({len(res.get('page_objects', []))} Page Objects, {len(res.get('tests', []))} Tests).")
+
+    def _populate_table(self):
+        self.files_table.setRowCount(0)
+        self.transpiled_cache.clear()
+        self.btn_transpile_all.setEnabled(len(self.scanned_files) > 0)
+        self.btn_import.setEnabled(False)
+        self.files_count_lbl.setText(f"Scanned Files ({len(self.scanned_files)})")
+
+        for idx, item in enumerate(self.scanned_files):
+            self.files_table.insertRow(idx)
+            fn_item = QTableWidgetItem(item["file_name"])
+            fn_item.setData(Qt.UserRole, idx)
+            t_item = QTableWidgetItem(item["type"].replace("_", " ").title())
+            l_item = QTableWidgetItem(str(item["locators_count"]))
+            m_item = QTableWidgetItem(str(item["methods_count"]))
+            s_item = QTableWidgetItem("Ready")
+            s_item.setForeground(QBrush(QColor("#94a3b8")))
+
+            self.files_table.setItem(idx, 0, fn_item)
+            self.files_table.setItem(idx, 1, t_item)
+            self.files_table.setItem(idx, 2, l_item)
+            self.files_table.setItem(idx, 3, m_item)
+            self.files_table.setItem(idx, 4, s_item)
+
+        if self.scanned_files:
+            self.files_table.selectRow(0)
+
+    def _on_file_selected(self):
+        sel = self.files_table.selectedItems()
+        if not sel:
+            return
+        row = sel[0].row()
+        item = self.scanned_files[row]
+        self.selected_file_lbl.setText(f"{item['file_name']}  ({item['type'].replace('_', ' ').title()})")
+        self.java_view.setPlainText(item.get("content", ""))
+        self.btn_transpile_cur.setEnabled(True)
+
+        if item["file_name"] in self.transpiled_cache:
+            tr = self.transpiled_cache[item["file_name"]]
+            self.python_view.setPlainText(tr.get("code", ""))
+            exp = tr.get("explanation", "Successfully transpiled.")
+            self.walkthrough_view.setPlainText(f"Class: {tr.get('class_name', '')}\nFile: {tr.get('file_name', '')}\nType: {tr.get('type', '')}\n\nWalkthrough:\n{exp}")
+        else:
+            self.python_view.setPlainText("")
+            self.walkthrough_view.setPlainText("Click 'Transpile This File' or 'Transpile All Files' to generate Python Playwright code.")
+
+    def _transpile_selected(self):
+        sel = self.files_table.selectedItems()
+        if not sel:
+            return
+        row = sel[0].row()
+        item = self.scanned_files[row]
+        self.status_lbl.setText(f"Transpiling {item['file_name']}...")
+        tr = self.mig_engine.migrate_file(item["file_name"], item["content"], item["type"])
+        self.transpiled_cache[item["file_name"]] = tr
+        self.python_view.setPlainText(tr.get("code", ""))
+        exp = tr.get("explanation", "Successfully transpiled.")
+        self.walkthrough_view.setPlainText(f"Class: {tr.get('class_name', '')}\nFile: {tr.get('file_name', '')}\nType: {tr.get('type', '')}\n\nWalkthrough:\n{exp}")
+
+        status_item = self.files_table.item(row, 4)
+        if status_item:
+            status_item.setText("Transpiled")
+            status_item.setForeground(QBrush(QColor("#34d399")))
+
+        self.btn_import.setEnabled(len(self.transpiled_cache) > 0)
+        self.status_lbl.setText(f"Transpiled {item['file_name']}.")
+
+    def _transpile_all(self):
+        total = len(self.scanned_files)
+        if total == 0:
+            return
+        self.btn_transpile_all.setEnabled(False)
+        for i, item in enumerate(self.scanned_files):
+            self.status_lbl.setText(f"Transpiling {i+1}/{total}: {item['file_name']}...")
+            self.pbar.setValue(int(((i + 1) / total) * 100))
+            QApplication.processEvents()
+            tr = self.mig_engine.migrate_file(item["file_name"], item["content"], item["type"])
+            self.transpiled_cache[item["file_name"]] = tr
+
+            status_item = self.files_table.item(i, 4)
+            if status_item:
+                status_item.setText("Transpiled")
+                status_item.setForeground(QBrush(QColor("#34d399")))
+
+        self._on_file_selected()
+        self.btn_transpile_all.setEnabled(True)
+        self.btn_import.setEnabled(True)
+        self.status_lbl.setText(f"Transpiled all {total} files successfully. Ready to import into Conduit Catalog.")
+
+    def _import_all(self):
+        if not self.transpiled_cache:
+            return
+        for item in self.scanned_files:
+            fn = item["file_name"]
+            if fn in self.transpiled_cache:
+                current_editor_code = self.python_view.toPlainText()
+                sel = self.files_table.selectedItems()
+                if sel and self.scanned_files[sel[0].row()]["file_name"] == fn and current_editor_code.strip():
+                    self.transpiled_cache[fn]["code"] = current_editor_code
+
+        res = self.mig_engine.apply_migration_to_conduit(self.transpiled_cache, self.catalog)
+        pages_n = len(res.get("pages_written", []))
+        tests_n = len(res.get("tests_written", []))
+        scens_n = res.get("scenarios_added", 0)
+
+        for i in range(self.files_table.rowCount()):
+            s_item = self.files_table.item(i, 4)
+            if s_item and s_item.text() == "Transpiled":
+                s_item.setText("Imported")
+                s_item.setForeground(QBrush(QColor("#38bdf8")))
+
+        self.status_lbl.setText(f"Imported {pages_n} Page Objects, {tests_n} Tests, {scens_n} Scenarios.")
+        QMessageBox.information(
+            self,
+            "Migration Complete",
+            f"Successfully imported into Conduit Catalog!\n\n"
+            f"Page Objects: {pages_n} files saved to pages/\n"
+            f"Test Suites: {tests_n} files saved to tests/\n"
+            f"Catalog Scenarios: {scens_n} registered and ready to execute."
+        )
+        if self.parent() and hasattr(self.parent(), "load_scenarios"):
+            self.parent().load_scenarios()
+        self.accept()
+
+
 class ConduitMainWindow(QMainWindow):
     def __init__(self, workspace_dir: str):
         super().__init__()
@@ -2743,11 +3228,13 @@ class ConduitMainWindow(QMainWindow):
         self.nav_record_btn = self._make_sidebar_btn("Record", clicked=self.on_record_clicked)
         self.nav_suites_btn = self._make_sidebar_btn("Suites", clicked=self.open_suites_dialog)
         self.nav_history_btn = self._make_sidebar_btn("History", clicked=self.open_history_dialog)
+        self.nav_migrate_btn = self._make_sidebar_btn("Migrate", clicked=self.open_migration_dialog)
 
         layout.addWidget(self.nav_catalog_btn)
         layout.addWidget(self.nav_record_btn)
         layout.addWidget(self.nav_suites_btn)
         layout.addWidget(self.nav_history_btn)
+        layout.addWidget(self.nav_migrate_btn)
 
         layout.addStretch()
 
@@ -2817,7 +3304,29 @@ class ConduitMainWindow(QMainWindow):
             new_hl = self.settings.get("headless", True)
             if self.headless != new_hl:
                 self.toggle_headless()
+            if hasattr(self, "btn_workers"):
+                w = self.settings.get("workers", 1)
+                w_lbl = f"⚡ {w} Worker" if w == 1 else (f"⚡ {w} Workers" if str(w).isdigit() else "⚡ Auto Workers")
+                self.btn_workers.setText(w_lbl)
             self.append_log("SUCCESS", "Conduit framework settings updated successfully.")
+
+    def open_migration_dialog(self):
+        dlg = MigrationDialog(self.catalog, self.claude_engine, self)
+        dlg.exec()
+        self.load_scenarios()
+
+    def toggle_workers(self):
+        cur = self.settings.get("workers", 1)
+        cycle = [1, 2, 4, "auto"]
+        try:
+            idx = cycle.index(cur)
+            nxt = cycle[(idx + 1) % len(cycle)]
+        except ValueError:
+            nxt = 1
+        self.settings["workers"] = nxt
+        w_lbl = f"⚡ {nxt} Worker" if nxt == 1 else (f"⚡ {nxt} Workers" if str(nxt).isdigit() else "⚡ Auto Workers")
+        self.btn_workers.setText(w_lbl)
+        self.append_log("INFO", f"Execution concurrency set to {nxt} worker(s).")
 
     def open_suites_dialog(self):
         dlg = SuitesDialog(self.catalog, on_run_suite=self.run_suite_by_tag, parent=self)
@@ -2918,6 +3427,25 @@ class ConduitMainWindow(QMainWindow):
         self.btn_claude_flow.clicked.connect(self.open_claude_flow_dialog)
         layout.addWidget(self.btn_claude_flow)
 
+        self.btn_migrate = QPushButton("🚀 Migrate Java")
+        self.btn_migrate.setCursor(Qt.PointingHandCursor)
+        self.btn_migrate.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7c3aed, stop:1 #4f46e5);
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 16px;
+                border-radius: 8px;
+                border: none;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6d28d9, stop:1 #4338ca);
+            }
+        """)
+        self.btn_migrate.clicked.connect(self.open_migration_dialog)
+        layout.addWidget(self.btn_migrate)
+
         self.btn_record_flow = QPushButton("● Record New Flow")
         self.btn_record_flow.setCursor(Qt.PointingHandCursor)
         self.btn_record_flow.setStyleSheet("""
@@ -3017,6 +3545,14 @@ class ConduitMainWindow(QMainWindow):
         self.headless_btn.setStyleSheet("background-color: transparent; color: #94a3b8; font-size: 11px; padding: 4px 6px; border: 1px solid #334155; border-radius: 4px;")
         self.headless_btn.clicked.connect(self.toggle_headless)
         b_layout.addWidget(self.headless_btn)
+
+        workers_count = self.settings.get("workers", 1)
+        w_lbl = f"⚡ {workers_count} Worker" if workers_count == 1 else (f"⚡ {workers_count} Workers" if str(workers_count).isdigit() else "⚡ Auto Workers")
+        self.btn_workers = QPushButton(w_lbl)
+        self.btn_workers.setCursor(Qt.PointingHandCursor)
+        self.btn_workers.setStyleSheet("background-color: transparent; color: #a78bfa; font-size: 11px; font-weight: bold; padding: 4px 6px; border: 1px solid #4c1d95; border-radius: 4px;")
+        self.btn_workers.clicked.connect(self.toggle_workers)
+        b_layout.addWidget(self.btn_workers)
 
         self.device_combo_top = QComboBox()
         self.device_combo_top.addItems([
@@ -4111,6 +4647,7 @@ class ConduitMainWindow(QMainWindow):
         ev_fmt = self.settings.get("evidence_format", "both")
         retries = self.settings.get("retries", 0)
         device = self.settings.get("device", "Desktop 1280x800")
+        workers = self.settings.get("workers", 1)
 
         self.runner.run_tests_async(
             test_file_paths=test_files,
@@ -4121,6 +4658,7 @@ class ConduitMainWindow(QMainWindow):
             evidence_format=ev_fmt,
             retries=retries,
             device=device,
+            workers=workers,
             on_log=_on_log,
             on_progress=_on_prog,
             on_finished=_on_fin

@@ -388,3 +388,36 @@ class ClaudeEngine:
                 "account_id": f"ACC-{1000 + i}"
             })
         return rows
+
+    def migrate_selenium_java_to_playwright(self, java_code: str, class_type: str = "auto") -> Dict[str, Any]:
+        from app.core.migration_engine import SeleniumJavaMigrationEngine
+        engine = SeleniumJavaMigrationEngine()
+
+        if not self.is_api_available():
+            return engine.migrate_file("MigratedClass.java", java_code, class_type)
+
+        system_prompt = (
+            "You are an expert test automation architect specializing in migrating legacy Selenium Java "
+            "frameworks to modern Python Playwright + Pytest frameworks following the Page Object Model pattern. "
+            "Return strictly valid JSON with this schema:\n"
+            "{\n"
+            '  "type": "page_object|test",\n'
+            '  "class_name": "ClassName",\n'
+            '  "file_name": "file_name.py",\n'
+            '  "code": "Python Playwright code",\n'
+            '  "explanation": "Summary of migration changes"\n'
+            "}\n"
+            "Do not include markdown fences outside the JSON."
+        )
+
+        user_prompt = f"Migrate the following Selenium Java class to Python + Playwright:\n{java_code}"
+
+        try:
+            raw_res = self.send_message(system_prompt, user_prompt)
+            json_text = self._extract_json(raw_res)
+            parsed = json.loads(json_text)
+            if "code" in parsed and "file_name" in parsed:
+                return parsed
+            return engine.migrate_file("MigratedClass.java", java_code, class_type)
+        except Exception:
+            return engine.migrate_file("MigratedClass.java", java_code, class_type)

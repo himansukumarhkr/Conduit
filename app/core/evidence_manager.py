@@ -29,7 +29,7 @@ class EvidenceCollector:
 
         self.timestamp_str = time.strftime("%Y%m%d_%H%M%S")
         clean_name = re.sub(r'[^a-zA-Z0-9_-]', '_', scenario_name)
-        self.evidence_dir = os.path.join(workspace_dir, "evidence", f"{clean_name}_{self.timestamp_str}")
+        self.evidence_dir = os.path.join(workspace_dir, "evidence", f"{clean_name}_{self.timestamp_str}_{os.getpid()}")
         self.docx_path = ""
 
     def attach(self, page):
