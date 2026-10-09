@@ -3350,40 +3350,50 @@ class ConduitMainWindow(QMainWindow):
     def build_top_bar(self):
         bar = QFrame()
         bar.setFixedHeight(64)
-        bar.setStyleSheet("background-color: #0d1527; border-bottom: 1px solid #1e293b;")
+        bar.setStyleSheet("background-color: #0b101d; border-bottom: 1px solid #1e293b;")
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(24, 0, 24, 0)
-        layout.setSpacing(16)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(12)
 
-        title = QLabel("Test Catalog")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
-        layout.addWidget(title)
+        left_cluster = QHBoxLayout()
+        left_cluster.setSpacing(10)
+
+        title = QLabel("Conduit")
+        title.setStyleSheet("font-size: 16px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px;")
+        left_cluster.addWidget(title)
+
+        divider = QLabel("|")
+        divider.setStyleSheet("color: #334155; font-size: 14px; font-weight: 300;")
+        left_cluster.addWidget(divider)
 
         self.env_pill_box = QHBoxLayout()
-        self.env_pill_box.setSpacing(6)
-        layout.addLayout(self.env_pill_box)
+        self.env_pill_box.setSpacing(4)
+        left_cluster.addLayout(self.env_pill_box)
 
-        add_env_btn = QPushButton("+ Env")
+        add_env_btn = QPushButton("+")
+        add_env_btn.setFixedSize(24, 24)
         add_env_btn.setCursor(Qt.PointingHandCursor)
+        add_env_btn.setToolTip("Add new Environment")
         add_env_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
                 border: 1px dashed #334155;
                 color: #94a3b8;
-                font-size: 11px;
+                font-size: 12px;
                 font-weight: bold;
-                border-radius: 14px;
-                padding: 4px 10px;
+                border-radius: 12px;
             }
             QPushButton:hover {
                 color: #38bdf8;
                 border-color: #38bdf8;
+                background-color: #0d1527;
             }
         """)
         add_env_btn.clicked.connect(self.quick_add_env)
-        layout.addWidget(add_env_btn)
+        left_cluster.addWidget(add_env_btn)
 
         test_data_btn = QPushButton("📊 Test Data")
+        test_data_btn.setFixedHeight(28)
         test_data_btn.setCursor(Qt.PointingHandCursor)
         test_data_btn.setStyleSheet("""
             QPushButton {
@@ -3391,9 +3401,9 @@ class ConduitMainWindow(QMainWindow):
                 border: 1px solid #2a3a5e;
                 color: #38bdf8;
                 font-size: 11px;
-                font-weight: bold;
-                border-radius: 14px;
-                padding: 4px 12px;
+                font-weight: 600;
+                border-radius: 6px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #1e293b;
@@ -3402,147 +3412,123 @@ class ConduitMainWindow(QMainWindow):
             }
         """)
         test_data_btn.clicked.connect(self.open_test_data_dialog)
-        layout.addWidget(test_data_btn)
+        left_cluster.addWidget(test_data_btn)
 
+        layout.addLayout(left_cluster)
         self.render_env_pills()
 
         layout.addStretch()
 
+        right_cluster = QHBoxLayout()
+        right_cluster.setSpacing(8)
+
         self.btn_claude_flow = QPushButton("✨ Claude AI Flow")
+        self.btn_claude_flow.setFixedHeight(34)
         self.btn_claude_flow.setCursor(Qt.PointingHandCursor)
         self.btn_claude_flow.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b5cf6, stop:1 #06b6d4);
-                color: #ffffff;
-                font-weight: bold;
-                font-size: 13px;
-                padding: 8px 18px;
-                border-radius: 8px;
-                border: none;
+                background-color: #1e1b4b;
+                border: 1px solid #6366f1;
+                color: #c7d2fe;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 0 12px;
+                border-radius: 6px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7c3aed, stop:1 #0891b2);
+                background-color: #312e81;
+                border-color: #818cf8;
+                color: #ffffff;
             }
         """)
         self.btn_claude_flow.clicked.connect(self.open_claude_flow_dialog)
-        layout.addWidget(self.btn_claude_flow)
+        right_cluster.addWidget(self.btn_claude_flow)
 
         self.btn_migrate = QPushButton("🚀 Migrate Java")
+        self.btn_migrate.setFixedHeight(34)
         self.btn_migrate.setCursor(Qt.PointingHandCursor)
         self.btn_migrate.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7c3aed, stop:1 #4f46e5);
-                color: #ffffff;
-                font-weight: bold;
-                font-size: 13px;
-                padding: 8px 16px;
-                border-radius: 8px;
-                border: none;
+                background-color: #1a162b;
+                border: 1px solid #7c3aed;
+                color: #ddd6fe;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 0 12px;
+                border-radius: 6px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6d28d9, stop:1 #4338ca);
+                background-color: #2e1065;
+                border-color: #a78bfa;
+                color: #ffffff;
             }
         """)
         self.btn_migrate.clicked.connect(self.open_migration_dialog)
-        layout.addWidget(self.btn_migrate)
+        right_cluster.addWidget(self.btn_migrate)
 
         self.btn_record_flow = QPushButton("● Record New Flow")
+        self.btn_record_flow.setFixedHeight(34)
         self.btn_record_flow.setCursor(Qt.PointingHandCursor)
         self.btn_record_flow.setStyleSheet("""
             QPushButton {
+                background-color: #1e293b;
+                border: 1px solid #3b82f6;
+                color: #60a5fa;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 0 12px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #2563eb;
+                color: #ffffff;
+            }
+        """)
+        self.btn_record_flow.clicked.connect(self.on_record_clicked)
+        right_cluster.addWidget(self.btn_record_flow)
+
+        run_btn = QPushButton("▶ Run Selected")
+        run_btn.setFixedHeight(34)
+        run_btn.setCursor(Qt.PointingHandCursor)
+        run_btn.setStyleSheet("""
+            QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
+                border: none;
                 color: #ffffff;
                 font-weight: bold;
-                font-size: 13px;
-                padding: 8px 18px;
-                border-radius: 8px;
-                border: none;
+                font-size: 12px;
+                padding: 0 16px;
+                border-radius: 6px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0369a1, stop:1 #1d4ed8);
             }
         """)
-        self.btn_record_flow.clicked.connect(self.on_record_clicked)
-        layout.addWidget(self.btn_record_flow)
-
-        run_btn = QPushButton("▶ Run Selected")
-        run_btn.setCursor(Qt.PointingHandCursor)
-        run_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #131b2e;
-                border: 1px solid #2a3a5e;
-                color: #93c5fd;
-                font-weight: bold;
-                font-size: 13px;
-                padding: 8px 16px;
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                border-color: #3b82f6;
-                color: #ffffff;
-                background-color: #18233c;
-            }
-        """)
         run_btn.clicked.connect(self.on_run_selected)
-        layout.addWidget(run_btn)
-
-        self.btn_evidence = QPushButton("📸 Evidence: ON")
-        self.btn_evidence.setCursor(Qt.PointingHandCursor)
-        self.btn_evidence.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(16, 185, 129, 0.15);
-                border: 1px solid #10b981;
-                color: #34d399;
-                font-weight: bold;
-                font-size: 11px;
-                padding: 6px 12px;
-                border-radius: 6px;
-            }
-        """)
-        self.btn_evidence.clicked.connect(self.toggle_evidence)
-        layout.addWidget(self.btn_evidence)
-
-        self.btn_top_report = QPushButton("📊 Report")
-        self.btn_top_report.setCursor(Qt.PointingHandCursor)
-        self.btn_top_report.setStyleSheet("""
-            QPushButton {
-                background-color: #131b2e;
-                border: 1px solid #2a3a5e;
-                color: #38bdf8;
-                font-weight: bold;
-                font-size: 11px;
-                padding: 6px 12px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                border-color: #38bdf8;
-                background-color: #1e293b;
-            }
-        """)
-        self.btn_top_report.clicked.connect(self.open_latest_html_report)
-        layout.addWidget(self.btn_top_report)
+        right_cluster.addWidget(run_btn)
 
         browser_box = QFrame()
-        browser_box.setStyleSheet("background-color: #131b2e; border: 1px solid #1e293b; border-radius: 8px; padding: 4px;")
+        browser_box.setFixedHeight(36)
+        browser_box.setStyleSheet("background-color: #070b13; border: 1px solid #1e293b; border-radius: 6px;")
         b_layout = QHBoxLayout(browser_box)
-        b_layout.setContentsMargins(6, 2, 6, 2)
-        b_layout.setSpacing(6)
+        b_layout.setContentsMargins(4, 2, 4, 2)
+        b_layout.setSpacing(4)
 
         self.btn_edge = QPushButton("Edge")
         self.btn_edge.setCursor(Qt.PointingHandCursor)
-        self.btn_edge.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-weight: bold; border-radius: 4px; padding: 4px 8px; border: none;")
+        self.btn_edge.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-weight: bold; border-radius: 4px; padding: 3px 7px; border: none; font-size: 11px;")
         self.btn_edge.clicked.connect(lambda: self.set_browser("msedge"))
         b_layout.addWidget(self.btn_edge)
 
         self.btn_chrome = QPushButton("Chrome")
         self.btn_chrome.setCursor(Qt.PointingHandCursor)
-        self.btn_chrome.setStyleSheet("background-color: transparent; color: #64748b; font-weight: bold; border-radius: 4px; padding: 4px 8px; border: none;")
+        self.btn_chrome.setStyleSheet("background-color: transparent; color: #64748b; font-weight: bold; border-radius: 4px; padding: 3px 7px; border: none; font-size: 11px;")
         self.btn_chrome.clicked.connect(lambda: self.set_browser("chrome"))
         b_layout.addWidget(self.btn_chrome)
 
         self.headless_btn = QPushButton("Headless: ON")
         self.headless_btn.setCursor(Qt.PointingHandCursor)
-        self.headless_btn.setStyleSheet("background-color: transparent; color: #94a3b8; font-size: 11px; padding: 4px 6px; border: 1px solid #334155; border-radius: 4px;")
+        self.headless_btn.setStyleSheet("background-color: transparent; color: #94a3b8; font-size: 11px; padding: 3px 6px; border: 1px solid #243048; border-radius: 4px;")
         self.headless_btn.clicked.connect(self.toggle_headless)
         b_layout.addWidget(self.headless_btn)
 
@@ -3550,7 +3536,7 @@ class ConduitMainWindow(QMainWindow):
         w_lbl = f"⚡ {workers_count} Worker" if workers_count == 1 else (f"⚡ {workers_count} Workers" if str(workers_count).isdigit() else "⚡ Auto Workers")
         self.btn_workers = QPushButton(w_lbl)
         self.btn_workers.setCursor(Qt.PointingHandCursor)
-        self.btn_workers.setStyleSheet("background-color: transparent; color: #a78bfa; font-size: 11px; font-weight: bold; padding: 4px 6px; border: 1px solid #4c1d95; border-radius: 4px;")
+        self.btn_workers.setStyleSheet("background-color: transparent; color: #a78bfa; font-size: 11px; font-weight: bold; padding: 3px 6px; border: 1px solid #3b2064; border-radius: 4px;")
         self.btn_workers.clicked.connect(self.toggle_workers)
         b_layout.addWidget(self.btn_workers)
 
@@ -3565,12 +3551,12 @@ class ConduitMainWindow(QMainWindow):
         self.device_combo_top.setStyleSheet("""
             QComboBox {
                 background-color: transparent;
-                border: 1px solid #334155;
+                border: 1px solid #243048;
                 border-radius: 4px;
-                padding: 2px 6px;
+                padding: 1px 5px;
                 color: #38bdf8;
                 font-size: 11px;
-                font-weight: bold;
+                font-weight: 500;
             }
         """)
         cur_dev = self.settings.get("device", "Desktop 1280x800")
@@ -3578,7 +3564,45 @@ class ConduitMainWindow(QMainWindow):
         self.device_combo_top.currentTextChanged.connect(self.on_device_changed)
         b_layout.addWidget(self.device_combo_top)
 
-        layout.addWidget(browser_box)
+        ev_on = self.settings.get("capture_evidence", True)
+        self.btn_evidence = QPushButton("📸 Evidence: ON" if ev_on else "📸 Evidence: OFF")
+        self.btn_evidence.setCursor(Qt.PointingHandCursor)
+        self.btn_evidence.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(16, 185, 129, 0.12);
+                border: 1px solid #10b981;
+                color: #34d399;
+                font-weight: 600;
+                font-size: 11px;
+                padding: 3px 7px;
+                border-radius: 4px;
+            }
+        """)
+        self.btn_evidence.clicked.connect(self.toggle_evidence)
+        b_layout.addWidget(self.btn_evidence)
+
+        self.btn_top_report = QPushButton("📊 Report")
+        self.btn_top_report.setCursor(Qt.PointingHandCursor)
+        self.btn_top_report.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: 1px solid #243048;
+                color: #38bdf8;
+                font-weight: 600;
+                font-size: 11px;
+                padding: 3px 7px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1e293b;
+                color: #ffffff;
+            }
+        """)
+        self.btn_top_report.clicked.connect(self.open_latest_html_report)
+        b_layout.addWidget(self.btn_top_report)
+
+        right_cluster.addWidget(browser_box)
+        layout.addLayout(right_cluster)
 
         return bar
 
@@ -3754,7 +3778,7 @@ class ConduitMainWindow(QMainWindow):
                 padding: 4px 10px;
                 color: #94a3b8;
                 font-size: 11px;
-                font-weight: bold;
+                font-weight: 600;
                 min-height: 32px;
             }
             QComboBox:hover {
@@ -3765,68 +3789,31 @@ class ConduitMainWindow(QMainWindow):
         self.status_filter_combo.currentIndexChanged.connect(self.apply_catalog_filters)
         filter_row.addWidget(self.status_filter_combo)
 
+        sel_pill_group = QFrame()
+        sel_pill_group.setStyleSheet("background-color: #0b1120; border: 1px solid #1e293b; border-radius: 6px;")
+        sel_pill_layout = QHBoxLayout(sel_pill_group)
+        sel_pill_layout.setContentsMargins(2, 2, 2, 2)
+        sel_pill_layout.setSpacing(2)
+
         btn_all = QPushButton("☑ All")
         btn_all.setCursor(Qt.PointingHandCursor)
-        btn_all.setStyleSheet("""
-            QPushButton {
-                background-color: #131b2e;
-                border: 1px solid #2a3a5e;
-                color: #93c5fd;
-                border-radius: 6px;
-                padding: 4px 12px;
-                font-size: 11px;
-                font-weight: bold;
-                min-height: 32px;
-            }
-            QPushButton:hover {
-                border-color: #38bdf8;
-                color: #ffffff;
-            }
-        """)
+        btn_all.setStyleSheet("background: transparent; border: none; color: #93c5fd; padding: 4px 10px; font-size: 11px; font-weight: bold;")
         btn_all.clicked.connect(lambda: self.set_bulk_selection(True))
-        filter_row.addWidget(btn_all)
+        sel_pill_layout.addWidget(btn_all)
 
         btn_none = QPushButton("☐ None")
         btn_none.setCursor(Qt.PointingHandCursor)
-        btn_none.setStyleSheet("""
-            QPushButton {
-                background-color: #131b2e;
-                border: 1px solid #2a3a5e;
-                color: #94a3b8;
-                border-radius: 6px;
-                padding: 4px 12px;
-                font-size: 11px;
-                font-weight: bold;
-                min-height: 32px;
-            }
-            QPushButton:hover {
-                border-color: #38bdf8;
-                color: #ffffff;
-            }
-        """)
+        btn_none.setStyleSheet("background: transparent; border: none; color: #94a3b8; padding: 4px 10px; font-size: 11px; font-weight: bold;")
         btn_none.clicked.connect(lambda: self.set_bulk_selection(False))
-        filter_row.addWidget(btn_none)
+        sel_pill_layout.addWidget(btn_none)
 
         btn_failed = QPushButton("⚡ Failed Only")
         btn_failed.setCursor(Qt.PointingHandCursor)
-        btn_failed.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(239, 68, 68, 0.15);
-                border: 1px solid #ef4444;
-                color: #f87171;
-                border-radius: 6px;
-                padding: 4px 12px;
-                font-size: 11px;
-                font-weight: bold;
-                min-height: 32px;
-            }
-            QPushButton:hover {
-                background-color: rgba(239, 68, 68, 0.3);
-            }
-        """)
+        btn_failed.setStyleSheet("background-color: rgba(239, 68, 68, 0.15); border: none; color: #f87171; border-radius: 4px; padding: 4px 10px; font-size: 11px; font-weight: bold;")
         btn_failed.clicked.connect(self.select_failed_scenarios)
-        filter_row.addWidget(btn_failed)
+        sel_pill_layout.addWidget(btn_failed)
 
+        filter_row.addWidget(sel_pill_group)
         layout.addLayout(filter_row)
 
         self.table = QTableWidget()
@@ -3893,18 +3880,27 @@ class ConduitMainWindow(QMainWindow):
         panel = QFrame()
         panel.setStyleSheet("background-color: #0b101b; border-left: 1px solid #1e293b;")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
 
         header_layout = QHBoxLayout()
-        inspector_title = QLabel("Test Inspector")
-        inspector_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #ffffff;")
+        header_layout.setContentsMargins(0, 0, 0, 2)
+        inspector_title = QLabel("Flow Inspector")
+        inspector_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #ffffff;")
         header_layout.addWidget(inspector_title)
         header_layout.addStretch()
+
+        toggle_lbl = QLabel("Show Code")
+        toggle_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #94a3b8;")
+        header_layout.addWidget(toggle_lbl)
+
+        self.code_toggle = ToggleSwitch()
+        self.code_toggle.stateChanged.connect(self.on_code_toggle)
+        header_layout.addWidget(self.code_toggle)
         layout.addLayout(header_layout)
 
         self.steps_box = QFrame()
-        self.steps_box.setStyleSheet("background-color: #131b2e; border: 1px solid #1e293b; border-radius: 8px;")
+        self.steps_box.setStyleSheet("background-color: #111827; border: 1px solid #1e293b; border-radius: 8px;")
         steps_layout = QVBoxLayout(self.steps_box)
         steps_layout.setContentsMargins(10, 10, 10, 10)
         steps_layout.setSpacing(8)
@@ -3966,17 +3962,6 @@ class ConduitMainWindow(QMainWindow):
         steps_layout.addWidget(self.steps_scroll)
 
         layout.addWidget(self.steps_box, 1)
-
-        toggle_row = QHBoxLayout()
-        toggle_lbl = QLabel("Show Code")
-        toggle_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #e2e8f0;")
-        toggle_row.addWidget(toggle_lbl)
-        toggle_row.addStretch()
-
-        self.code_toggle = ToggleSwitch()
-        self.code_toggle.stateChanged.connect(self.on_code_toggle)
-        toggle_row.addWidget(self.code_toggle)
-        layout.addLayout(toggle_row)
 
         self.code_viewer_frame = QFrame()
         self.code_viewer_frame.setStyleSheet("background-color: #0b1120; border: 1px solid #1e293b; border-radius: 8px;")
@@ -4042,22 +4027,23 @@ class ConduitMainWindow(QMainWindow):
 
         layout.addWidget(self.code_viewer_frame, 1)
 
-        logs_frame = QFrame()
-        logs_frame.setFixedHeight(160)
-        logs_frame.setStyleSheet("background-color: #090e18; border: 1px solid #1e293b; border-radius: 8px;")
-        logs_layout = QVBoxLayout(logs_frame)
-        logs_layout.setContentsMargins(10, 8, 10, 8)
+        self.logs_frame = QFrame()
+        self.logs_frame.setFixedHeight(120)
+        self.logs_frame.setStyleSheet("background-color: #070b13; border: 1px solid #1e293b; border-radius: 8px;")
+        logs_layout = QVBoxLayout(self.logs_frame)
+        logs_layout.setContentsMargins(10, 6, 10, 6)
         logs_layout.setSpacing(4)
 
         logs_hdr = QHBoxLayout()
-        logs_title = QLabel("Terminal Logs")
-        logs_title.setStyleSheet("font-size: 11px; font-weight: bold; color: #cbd5e1;")
-        logs_hdr.addWidget(logs_title)
-        logs_hdr.addStretch()
+        self.btn_toggle_logs = QPushButton("Terminal Logs ▲")
+        self.btn_toggle_logs.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle_logs.setStyleSheet("background: transparent; border: none; color: #94a3b8; font-size: 11px; font-weight: bold; text-align: left;")
+        self.btn_toggle_logs.clicked.connect(self.toggle_terminal_logs)
+        logs_hdr.addWidget(self.btn_toggle_logs, 1)
 
         clear_btn = QPushButton("Clear")
         clear_btn.setCursor(Qt.PointingHandCursor)
-        clear_btn.setStyleSheet("background: transparent; border: none; color: #64748b; font-size: 10px;")
+        clear_btn.setStyleSheet("background: transparent; border: none; color: #64748b; font-size: 10px; font-weight: 600;")
         clear_btn.clicked.connect(lambda: self.log_feed.clear())
         logs_hdr.addWidget(clear_btn)
         logs_layout.addLayout(logs_hdr)
@@ -4067,8 +4053,8 @@ class ConduitMainWindow(QMainWindow):
         self.log_feed.setFont(QFont("Consolas", 10))
         self.log_feed.setStyleSheet("""
             QPlainTextEdit {
-                background-color: #070b13;
-                border: 1px solid #1e293b;
+                background-color: #05080f;
+                border: 1px solid #141c2e;
                 border-radius: 6px;
                 color: #e2e8f0;
                 padding: 6px;
@@ -4078,10 +4064,20 @@ class ConduitMainWindow(QMainWindow):
         """)
         logs_layout.addWidget(self.log_feed)
 
-        layout.addWidget(logs_frame)
+        layout.addWidget(self.logs_frame)
 
         self.append_log("INFO", "Conduit Pure Python Desktop Engine initialized.")
         return panel
+
+    def toggle_terminal_logs(self):
+        is_visible = self.log_feed.isVisible()
+        self.log_feed.setVisible(not is_visible)
+        if is_visible:
+            self.logs_frame.setFixedHeight(30)
+            self.btn_toggle_logs.setText("Terminal Logs ▼")
+        else:
+            self.logs_frame.setFixedHeight(120)
+            self.btn_toggle_logs.setText("Terminal Logs ▲")
 
     def build_bottom_bar(self):
         bar = QFrame()
