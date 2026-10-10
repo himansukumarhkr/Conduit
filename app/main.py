@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 if getattr(sys, "frozen", False):
     BASE_DIR = os.path.dirname(sys.executable)
@@ -61,7 +61,7 @@ class DesktopAPI:
         )
         return {"status": "started", "tests_count": len(test_files)}
 
-    def start_recording(self, scenario_name: str, start_url: str, tags: List[str], browser: str = "msedge", on_action=None):
+    def start_recording(self, scenario_name: str, start_url: str, tags: List[str], browser: str = "msedge", on_action=None, variables: Optional[Dict[str, Any]] = None):
         self._current_recording_meta = {
             "name": scenario_name,
             "url": start_url,
@@ -70,7 +70,7 @@ class DesktopAPI:
         }
 
         self.recorder = BrowserRecorder(on_action_recorded=on_action)
-        self.recorder.start_recording(initial_url=start_url, browser_channel=browser)
+        self.recorder.start_recording(initial_url=start_url, browser_channel=browser, variables=variables)
 
         return {
             "status": "recording_started",

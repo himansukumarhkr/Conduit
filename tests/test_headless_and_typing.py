@@ -112,6 +112,63 @@ def test_recorder_username_password_multi_input():
     assert recorder.recorded_actions[1]["action"] == "fill"
 
 
+def test_recorder_click_before_fill_consolidation():
+    recorded = []
+    recorder = BrowserRecorder(on_action_recorded=lambda a: recorded.append(a))
+
+    click_event = {
+        "action": "click",
+        "meta": {
+            "tag": "input",
+            "attributes": {"id": "username_field"},
+            "css_selector": "#username_field"
+        },
+        "url": "https://example.com/login"
+    }
+    recorder._handle_raw_event(None, click_event)
+    assert len(recorder.recorded_actions) == 1
+    assert recorder.recorded_actions[0]["action"] == "click"
+
+    fill_event = {
+        "action": "fill",
+        "value": "my_user",
+        "meta": {
+            "tag": "input",
+            "attributes": {"id": "username_field"},
+            "css_selector": "#username_field"
+        },
+        "url": "https://example.com/login"
+    }
+    recorder._handle_raw_event(None, fill_event)
+    assert len(recorder.recorded_actions) == 1
+    assert recorder.recorded_actions[0]["action"] == "fill"
+    assert recorder.recorded_actions[0]["value"] == "my_user"
+
+
+def test_recorder_variables_insertion():
+    recorded = []
+    recorder = BrowserRecorder(on_action_recorded=lambda a: recorded.append(a))
+
+    var_event = {
+        "action": "fill",
+        "value": "admin@conduit.io",
+        "variable_name": "username",
+        "meta": {
+            "tag": "input",
+            "attributes": {"id": "username_field", "name": "username"},
+            "css_selector": "#username_field"
+        },
+        "url": "https://example.com/login"
+    }
+    recorder._handle_raw_event(None, var_event)
+    assert len(recorder.recorded_actions) == 1
+    assert recorder.recorded_actions[0]["action"] == "fill"
+    assert recorder.recorded_actions[0]["value"] == "admin@conduit.io"
+    assert recorder.recorded_actions[0]["variable_name"] == "username"
+    assert "Fill " in recorder.recorded_actions[0]["human_description"]
+    assert "username" in recorder.recorded_actions[0]["human_description"]
+
+
 def test_code_editor_auto_indentation():
     editor = CodeEditor()
     editor.setPlainText("def sample_function():")

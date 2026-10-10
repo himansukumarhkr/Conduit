@@ -207,7 +207,7 @@ class SelectorEngine:
         elif action_type == "click":
             return f"Click {friendly_target}"
         elif action_type == "fill":
-            masked_val = "••••••" if "password" in var_name else f"'{value}'"
+            masked_val = "'********'" if "password" in var_name else f"'{value}'"
             return f"Fill {friendly_target} with {masked_val}"
         elif action_type == "assert_visible":
             return f"Assert {friendly_target} is visible"

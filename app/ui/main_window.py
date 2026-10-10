@@ -5050,16 +5050,29 @@ class ConduitMainWindow(QMainWindow):
         def _on_finished(actions):
             self.bridge.recording_finished_signal.emit(actions)
 
+        active_vars = {}
+        try:
+            env_data = self.test_data_mgr.get_environment_data(self.current_env)
+            if env_data and "variables" in env_data:
+                active_vars = env_data["variables"]
+        except Exception:
+            pass
+
         self.recorder = BrowserRecorder(
             on_action_recorded=_on_action,
             on_recording_finished=_on_finished
         )
-        self.recorder.start_recording(initial_url=url, browser_channel=self.selected_browser)
+        self.recorder.start_recording(
+            initial_url=url,
+            browser_channel=self.selected_browser,
+            variables=active_vars
+        )
         self.append_log("INFO", "Recording active in browser. Perform actions or Alt+Click to assert.")
 
     def on_action_recorded(self, step_data: dict):
         desc = step_data.get("human_description", "")
         self.append_log("INFO", f"Recorded step: {desc}")
+        self.status_lbl.setText(f"● Recording: {desc}")
 
     def on_recording_completed(self, actions: list):
         self.btn_record_flow.setText("● Record New Flow")
