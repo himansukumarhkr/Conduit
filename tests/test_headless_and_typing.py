@@ -77,6 +77,41 @@ def test_recorder_typing_consolidation():
     assert recorder.recorded_actions[1]["value"] == "Enter"
 
 
+def test_recorder_username_password_multi_input():
+    recorded = []
+    recorder = BrowserRecorder(on_action_recorded=lambda a: recorded.append(a))
+
+    user_event = {
+        "action": "fill",
+        "value": "admin_user",
+        "meta": {
+            "tag": "input",
+            "attributes": {"type": "text", "name": "username"},
+            "css_selector": "form > input:nth-of-type(1)"
+        },
+        "url": "https://example.com/login"
+    }
+    recorder._handle_raw_event(None, user_event)
+
+    pass_event = {
+        "action": "fill",
+        "value": "SecretPassword123!",
+        "meta": {
+            "tag": "input",
+            "attributes": {"type": "password", "name": "password"},
+            "css_selector": "form > input:nth-of-type(2)"
+        },
+        "url": "https://example.com/login"
+    }
+    recorder._handle_raw_event(None, pass_event)
+
+    assert len(recorder.recorded_actions) == 2
+    assert recorder.recorded_actions[0]["value"] == "admin_user"
+    assert recorder.recorded_actions[1]["value"] == "SecretPassword123!"
+    assert recorder.recorded_actions[0]["action"] == "fill"
+    assert recorder.recorded_actions[1]["action"] == "fill"
+
+
 def test_code_editor_auto_indentation():
     editor = CodeEditor()
     editor.setPlainText("def sample_function():")

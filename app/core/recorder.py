@@ -35,19 +35,28 @@ RECORDER_INJECTED_SCRIPT = """
             clearTimeout(debounceTimer);
             debounceTimer = null;
         }
-        if (lastActiveElement && lastTypedValue !== '') {
-            const meta = getElementMeta(lastActiveElement);
-            (window.__conduit_record__ || window.__testflow_record__)({
-                action: 'fill',
-                meta: meta,
-                value: lastTypedValue,
-                url: window.location.href,
-                timestamp: Date.now()
-            });
+        if (!lastActiveElement && document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+            lastActiveElement = document.activeElement;
+            lastTypedValue = document.activeElement.value !== undefined ? document.activeElement.value : (document.activeElement.innerText || '');
+        }
+        if (lastActiveElement) {
+            const currentVal = lastActiveElement.value !== undefined ? lastActiveElement.value : (lastActiveElement.innerText || '');
+            const valToRecord = currentVal !== '' ? currentVal : lastTypedValue;
+            if (valToRecord !== '') {
+                const meta = getElementMeta(lastActiveElement);
+                (window.__conduit_record__ || window.__testflow_record__)({
+                    action: 'fill',
+                    meta: meta,
+                    value: valToRecord,
+                    url: window.location.href,
+                    timestamp: Date.now()
+                });
+            }
             lastActiveElement = null;
             lastTypedValue = '';
         }
     }
+    window.__conduit_flush__ = flushActiveInput;
 
     const finishBtn = document.getElementById('__conduit_finish_btn__');
     if (finishBtn) {
@@ -70,12 +79,35 @@ RECORDER_INJECTED_SCRIPT = """
         for (let i = 0; i < el.attributes.length; i++) {
             attrs[el.attributes[i].name] = el.attributes[i].value;
         }
+
+        let labelText = '';
+        if (el.labels && el.labels.length > 0) {
+            labelText = (el.labels[0].innerText || el.labels[0].textContent || '').trim();
+        } else if (el.id) {
+            try {
+                const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+                if (lbl) labelText = (lbl.innerText || lbl.textContent || '').trim();
+            } catch (err) {}
+        }
+        if (!labelText && el.closest('label')) {
+            labelText = (el.closest('label').innerText || el.closest('label').textContent || '').trim();
+        }
+        if (!labelText && el.parentElement) {
+            const prev = el.previousElementSibling;
+            if (prev && prev.tagName.toLowerCase() === 'label') {
+                labelText = (prev.innerText || prev.textContent || '').trim();
+            }
+        }
+
+        const ariaLabel = el.getAttribute('aria-label') || labelText || '';
+        const role = el.getAttribute('role') || (el.tagName.toLowerCase() === 'input' ? (attrs.type === 'password' ? 'password' : 'textbox') : el.tagName.toLowerCase());
+
         return {
             tag: el.tagName.toLowerCase(),
             attributes: attrs,
             text: (el.innerText || el.textContent || '').trim().slice(0, 80),
-            role: el.getAttribute('role') || el.tagName.toLowerCase(),
-            aria_label: el.getAttribute('aria-label') || '',
+            role: role,
+            aria_label: ariaLabel,
             placeholder: el.getAttribute('placeholder') || '',
             css_selector: getUniqueCssSelector(el)
         };
@@ -106,23 +138,23 @@ RECORDER_INJECTED_SCRIPT = """
 
     document.addEventListener('input', (e) => {
         if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
+        if (lastActiveElement && lastActiveElement !== e.target) {
+            flushActiveInput();
+        }
         lastActiveElement = e.target;
         lastTypedValue = e.target.value !== undefined ? e.target.value : (e.target.innerText || '');
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
             flushActiveInput();
-        }, 350);
+        }, 200);
     }, true);
 
     document.addEventListener('keydown', (e) => {
         if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
-        if (e.key === 'Enter') {
-            const currentVal = e.target.value !== undefined ? e.target.value : (e.target.innerText || '');
-            if (currentVal !== '') {
-                lastActiveElement = e.target;
-                lastTypedValue = currentVal;
-                flushActiveInput();
-            }
+        if (e.key === 'Tab') {
+            flushActiveInput();
+        } else if (e.key === 'Enter') {
+            flushActiveInput();
             const meta = getElementMeta(e.target);
             (window.__conduit_record__ || window.__testflow_record__)({
                 action: 'press',
@@ -163,11 +195,23 @@ RECORDER_INJECTED_SCRIPT = """
         flushActiveInput();
     }, true);
 
-    document.addEventListener('blur', (e) => {
+    document.addEventListener('focusout', (e) => {
         if (lastActiveElement === e.target) {
             flushActiveInput();
         }
     }, true);
+
+    document.addEventListener('submit', (e) => {
+        flushActiveInput();
+    }, true);
+
+    window.addEventListener('beforeunload', () => {
+        flushActiveInput();
+    });
+
+    window.addEventListener('pagehide', () => {
+        flushActiveInput();
+    });
 
     function showAssertionMenu(x, y, meta, el) {
         const existing = document.getElementById('__conduit_context_menu__');
@@ -320,7 +364,16 @@ class BrowserRecorder:
 
             if act_type == "fill" and self.recorded_actions:
                 last_action = self.recorded_actions[-1]
-                if last_action.get("action") == "fill" and last_action.get("selector_info", {}).get("var_name") == selector_info.get("var_name"):
+                same_element = False
+                if last_action.get("action") == "fill":
+                    last_css = last_action.get("meta", {}).get("css_selector")
+                    curr_css = meta.get("css_selector")
+                    if last_css and curr_css and last_css == curr_css:
+                        same_element = True
+                    elif last_action.get("selector_info", {}).get("code") == selector_info.get("code") and last_action.get("selector_info", {}).get("var_name") == selector_info.get("var_name"):
+                        same_element = True
+
+                if same_element:
                     last_action["value"] = val
                     last_action["human_description"] = human_desc
                     last_action["timestamp"] = event_data.get("timestamp", time.time())
@@ -348,6 +401,12 @@ class BrowserRecorder:
     def stop_recording(self) -> List[Dict[str, Any]]:
         self._is_recording = False
         try:
+            if self._page and not self._page.is_closed():
+                try:
+                    self._page.evaluate("if (window.__conduit_flush__) window.__conduit_flush__();")
+                    time.sleep(0.15)
+                except Exception:
+                    pass
             if self._context:
                 self._context.close()
             if self._browser:

@@ -81,6 +81,17 @@ class SelectorEngine:
                 "display": f"placeholder='{placeholder}'"
             })
 
+        if tag == "input" and attrs.get("type") == "password":
+            var_name = "password_input" if not element_id else f"{cls.clean_identifier(element_id)}_input"
+            candidates.append({
+                "rank": 70,
+                "strategy": "password_input",
+                "code": 'page.locator("input[type=\'password\']")' if not element_id else f'page.locator("#{element_id}")',
+                "locator_expr": 'self.page.locator("input[type=\'password\']")' if not element_id else f'self.page.locator("#{element_id}")',
+                "var_name": var_name,
+                "display": "input[type='password']" if not element_id else f"#{element_id}"
+            })
+
         if text and len(text) < 40 and "\n" not in text:
             var_name = f"{cls.clean_identifier(text)}_{tag}"
             candidates.append({
