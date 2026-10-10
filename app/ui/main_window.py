@@ -9,14 +9,14 @@ from PySide6.QtCore import (
     Qt, QRect, QRectF, QSize, QPoint, Signal, QObject, QPropertyAnimation, Property, QThread
 )
 from PySide6.QtGui import (
-    QColor, QPainter, QBrush, QPen, QFont, QTextCharFormat, QSyntaxHighlighter, QTextCursor
+    QColor, QPainter, QBrush, QPen, QFont, QTextCharFormat, QSyntaxHighlighter, QTextCursor, QCursor
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QStyledItemDelegate, QPlainTextEdit, QScrollArea, QFrame, QDialog,
     QLineEdit, QCheckBox, QProgressBar, QSplitter, QSizePolicy, QComboBox, QStyle,
-    QTabWidget, QInputDialog, QMessageBox, QFileDialog
+    QTabWidget, QInputDialog, QMessageBox, QFileDialog, QMenu
 )
 import ast
 
@@ -303,6 +303,139 @@ class ExecutionBridge(QObject):
     finished_signal = Signal(dict)
     recording_finished_signal = Signal(list)
     action_recorded_signal = Signal(dict)
+
+
+class NewScriptDialog(QDialog):
+    def __init__(self, parent=None, default_url="https://demo.playwright.dev/todomvc/"):
+        super().__init__(parent)
+        self.setWindowTitle("Create New Test Script")
+        self.setFixedSize(480, 360)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0b1120;
+                border: 1px solid #1e293b;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #94a3b8;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QLineEdit {
+                background-color: #070b13;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                padding: 8px 12px;
+                color: #ffffff;
+                font-size: 13px;
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+            }
+            QLineEdit:focus {
+                border-color: #38bdf8;
+            }
+            QComboBox {
+                background-color: #070b13;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #f1f5f9;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QComboBox:focus {
+                border-color: #38bdf8;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #0f172a;
+                border: 1px solid #334155;
+                selection-background-color: #1e293b;
+                selection-color: #38bdf8;
+                color: #e2e8f0;
+                padding: 4px;
+            }
+            QPushButton#btnCreate {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284c7, stop:1 #2563eb);
+                color: white;
+                font-weight: bold;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-size: 13px;
+                border: none;
+            }
+            QPushButton#btnCreate:hover {
+                background: #0369a1;
+            }
+            QPushButton#btnCancel {
+                background-color: #111827;
+                border: 1px solid #1e293b;
+                color: #94a3b8;
+                border-radius: 8px;
+                padding: 10px 18px;
+                font-size: 13px;
+            }
+            QPushButton#btnCancel:hover {
+                background-color: #1e293b;
+                color: #ffffff;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
+
+        title = QLabel("Create New Test Script")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        layout.addWidget(title)
+
+        layout.addWidget(QLabel("Scenario / Test Name"))
+        self.name_edit = QLineEdit("User Journey Checkout Flow")
+        layout.addWidget(self.name_edit)
+
+        layout.addWidget(QLabel("Target / Starting URL"))
+        self.url_edit = QLineEdit(default_url)
+        layout.addWidget(self.url_edit)
+
+        layout.addWidget(QLabel("Tags (comma separated)"))
+        self.tags_edit = QLineEdit("@smoke, @regression")
+        layout.addWidget(self.tags_edit)
+
+        layout.addWidget(QLabel("Creation Mode"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("📝 Blank Playwright Test (Code & Steps)", "blank")
+        self.mode_combo.addItem("● Launch Browser Recorder", "record")
+        self.mode_combo.addItem("✨ Generate with Claude AI", "claude")
+        layout.addWidget(self.mode_combo)
+
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 8, 0, 0)
+        btn_row.addStretch()
+
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setObjectName("btnCancel")
+        self.btn_cancel.setCursor(Qt.PointingHandCursor)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(self.btn_cancel)
+
+        self.btn_create = QPushButton("Create Script")
+        self.btn_create.setObjectName("btnCreate")
+        self.btn_create.setCursor(Qt.PointingHandCursor)
+        self.btn_create.clicked.connect(self.accept)
+        btn_row.addWidget(self.btn_create)
+
+        layout.addLayout(btn_row)
+
+    def get_data(self):
+        name = self.name_edit.text().strip() or "Custom Test Journey"
+        url = self.url_edit.text().strip() or "https://demo.playwright.dev/todomvc/"
+        raw_tags = self.tags_edit.text().replace(",", " ").split()
+        tags = [t if t.startswith("@") else f"@{t}" for t in raw_tags] if raw_tags else ["@smoke"]
+        mode = self.mode_combo.currentData()
+        return name, url, tags, mode
 
 
 class RecordDialog(QDialog):
@@ -3814,6 +3947,28 @@ class ConduitMainWindow(QMainWindow):
         sel_pill_layout.addWidget(btn_failed)
 
         filter_row.addWidget(sel_pill_group)
+
+        self.btn_add_script = QPushButton("+ New Script")
+        self.btn_add_script.setCursor(Qt.PointingHandCursor)
+        self.btn_add_script.setStyleSheet("""
+            QPushButton {
+                background-color: #0f172a;
+                border: 1px solid #0284c7;
+                border-radius: 6px;
+                color: #38bdf8;
+                padding: 5px 12px;
+                font-size: 11px;
+                font-weight: 700;
+                min-height: 32px;
+            }
+            QPushButton:hover {
+                background-color: #0284c7;
+                color: #ffffff;
+            }
+        """)
+        self.btn_add_script.clicked.connect(self.prompt_add_new_script)
+        filter_row.addWidget(self.btn_add_script)
+
         layout.addLayout(filter_row)
 
         self.table = QTableWidget()
@@ -3825,6 +3980,8 @@ class ConduitMainWindow(QMainWindow):
         self.table.setShowGrid(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.on_table_context_menu)
         self.table.setItemDelegate(TablePillDelegate(self.table))
 
         self.table.setColumnWidth(0, 36)
@@ -3833,7 +3990,7 @@ class ConduitMainWindow(QMainWindow):
         self.table.setColumnWidth(3, 130)
         self.table.setColumnWidth(4, 100)
         self.table.setColumnWidth(5, 80)
-        self.table.setColumnWidth(6, 70)
+        self.table.setColumnWidth(6, 80)
 
         self.table.cellClicked.connect(self.on_table_cell_clicked)
         layout.addWidget(self.table)
@@ -3890,8 +4047,28 @@ class ConduitMainWindow(QMainWindow):
         header_layout.addWidget(inspector_title)
         header_layout.addStretch()
 
+        self.btn_delete_flow = QPushButton("🗑️ Delete")
+        self.btn_delete_flow.setCursor(Qt.PointingHandCursor)
+        self.btn_delete_flow.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(239, 68, 68, 0.12);
+                border: 1px solid rgba(239, 68, 68, 0.35);
+                color: #fca5a5;
+                font-size: 11px;
+                font-weight: 600;
+                border-radius: 6px;
+                padding: 3px 8px;
+            }
+            QPushButton:hover {
+                background-color: #ef4444;
+                color: #ffffff;
+            }
+        """)
+        self.btn_delete_flow.clicked.connect(self.delete_current_scenario)
+        header_layout.addWidget(self.btn_delete_flow)
+
         toggle_lbl = QLabel("Show Code")
-        toggle_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #94a3b8;")
+        toggle_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #94a3b8; margin-left: 6px;")
         header_layout.addWidget(toggle_lbl)
 
         self.code_toggle = ToggleSwitch()
@@ -4157,7 +4334,7 @@ class ConduitMainWindow(QMainWindow):
 
         return bar
 
-    def load_scenarios(self):
+    def load_scenarios(self, current_selected=None):
         checked_ids = set()
         has_existing = self.table.rowCount() > 0
         if has_existing:
@@ -4169,7 +4346,8 @@ class ConduitMainWindow(QMainWindow):
                     if sid:
                         checked_ids.add(sid)
 
-        current_selected = getattr(self, "selected_scenario_id", None)
+        if current_selected is None:
+            current_selected = getattr(self, "selected_scenario_id", None)
         scenarios = self.catalog.get_all_scenarios()
         self.table.setRowCount(len(scenarios))
         self.status_lbl.setText(f"Ready - {len(scenarios)} scenario(s) loaded")
@@ -4219,9 +4397,25 @@ class ConduitMainWindow(QMainWindow):
             play_btn.clicked.connect(lambda _, s_id=sid: self.run_single_test(s_id))
             act_layout.addWidget(play_btn)
 
-            more_lbl = QLabel("•••")
-            more_lbl.setStyleSheet("color: #64748b; font-size: 10px;")
-            act_layout.addWidget(more_lbl)
+            more_btn = QPushButton("⋮")
+            more_btn.setFixedSize(22, 22)
+            more_btn.setCursor(Qt.PointingHandCursor)
+            more_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    color: #94a3b8;
+                    font-size: 14px;
+                    font-weight: bold;
+                    border: none;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #1e293b;
+                    color: #ffffff;
+                }
+            """)
+            more_btn.clicked.connect(lambda _, s_id=sid, b=more_btn: self.show_row_actions_menu(s_id, b))
+            act_layout.addWidget(more_btn)
             act_layout.addStretch()
 
             self.table.setCellWidget(row, 6, actions_widget)
@@ -4229,6 +4423,15 @@ class ConduitMainWindow(QMainWindow):
         if scenarios:
             target_id = current_selected if current_selected and any(s.get("id") == current_selected for s in scenarios) else scenarios[0].get("id")
             self.select_scenario(target_id)
+        else:
+            self.selected_scenario_id = None
+            self.steps_title_lbl.setText("No Scenarios Available")
+            while self.steps_container_layout.count():
+                item = self.steps_container_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            self.code_edit.setPlainText("")
+            self.code_filename_lbl.setText("no_file.py")
 
     def on_table_cell_clicked(self, row, col):
         name_item = self.table.item(row, 1)
@@ -4485,14 +4688,18 @@ class ConduitMainWindow(QMainWindow):
         self.settings["device"] = dev_name
         self.append_log("INFO", f"Device emulation preset set to [{dev_name}]")
 
-    def open_claude_flow_dialog(self):
-        cur_url = self.settings.get("base_url", "https://demo.playwright.dev/todomvc/")
+    def open_claude_flow_dialog(self, prefill_name: str = "", prefill_url: str = ""):
+        cur_url = prefill_url or self.settings.get("base_url", "https://demo.playwright.dev/todomvc/")
         dlg = ClaudePromptDialog(self.claude_engine, base_url=cur_url, parent=self)
+        if prefill_name and hasattr(dlg, "prompt_edit"):
+            dlg.prompt_edit.setPlainText(f"User journey flow for {prefill_name} on {cur_url}")
         if dlg.exec() == QDialog.Accepted:
             sc = dlg.get_generated_scenario()
             if sc:
+                if prefill_name:
+                    sc["name"] = prefill_name
                 self.catalog.add_or_update_scenario(sc)
-                self.load_scenarios()
+                self.load_scenarios(current_selected=sc["id"])
                 self.select_scenario(sc["id"])
                 self.append_log("SUCCESS", f"Claude synthesized flow '{sc.get('name')}' added to catalog.")
 
@@ -4660,6 +4867,139 @@ class ConduitMainWindow(QMainWindow):
             on_finished=_on_fin
         )
 
+    def prompt_add_new_script(self):
+        default_url = "https://demo.playwright.dev/todomvc/"
+        try:
+            env_data = self.test_data_mgr.get_environment_data(self.current_env)
+            if env_data and env_data.get("variables", {}).get("BASE_URL"):
+                default_url = env_data["variables"]["BASE_URL"]
+        except Exception:
+            pass
+
+        dlg = NewScriptDialog(self, default_url=default_url)
+        if dlg.exec() == QDialog.Accepted:
+            name, url, tags, mode = dlg.get_data()
+            if mode == "blank":
+                sc = self.catalog.create_empty_scenario(name=name, tags=tags, base_url=url)
+                self.load_scenarios(current_selected=sc["id"])
+                self.select_scenario(sc["id"])
+                self.code_toggle.setChecked(True)
+                self.append_log("SUCCESS", f"Created new test script '{name}' ({sc['file_name']})")
+            elif mode == "record":
+                self.start_recording_flow(name=name, url=url, tags=tags)
+            elif mode == "claude":
+                self.open_claude_flow_dialog(prefill_name=name, prefill_url=url)
+
+    def on_table_context_menu(self, pos):
+        row = self.table.rowAt(pos.y())
+        if row >= 0:
+            name_item = self.table.item(row, 1)
+            if name_item:
+                s_id = name_item.data(Qt.UserRole)
+                if s_id:
+                    self.show_row_actions_menu(s_id)
+
+    def show_row_actions_menu(self, scenario_id: str, button_widget=None):
+        sc = self.catalog.get_scenario(scenario_id)
+        if not sc:
+            return
+
+        self.select_scenario(scenario_id)
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #0f172a;
+                border: 1px solid #334155;
+                border-radius: 8px;
+                padding: 6px;
+                color: #e2e8f0;
+            }
+            QMenu::item {
+                padding: 6px 16px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QMenu::item:selected {
+                background-color: #1e293b;
+                color: #38bdf8;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #1e293b;
+                margin: 4px 6px;
+            }
+        """)
+
+        act_run = menu.addAction("▶ Run Test")
+        act_run.triggered.connect(lambda: self.run_single_test(scenario_id))
+
+        act_code = menu.addAction("📝 Edit Code")
+        act_code.triggered.connect(lambda: self.open_scenario_code(scenario_id))
+
+        menu.addSeparator()
+
+        act_dup = menu.addAction("📋 Duplicate Script")
+        act_dup.triggered.connect(lambda: self.duplicate_scenario(scenario_id))
+
+        act_ren = menu.addAction("✏️ Rename Script")
+        act_ren.triggered.connect(lambda: self.rename_scenario(scenario_id))
+
+        menu.addSeparator()
+
+        act_del = menu.addAction("🗑️ Delete Script")
+        act_del.triggered.connect(lambda: self.delete_scenario(scenario_id))
+
+        if button_widget:
+            pos = button_widget.mapToGlobal(QPoint(0, button_widget.height()))
+            menu.exec(pos)
+        else:
+            menu.exec(QCursor.pos())
+
+    def open_scenario_code(self, scenario_id: str):
+        self.select_scenario(scenario_id)
+        self.code_toggle.setChecked(True)
+
+    def duplicate_scenario(self, scenario_id: str):
+        new_sc = self.catalog.duplicate_scenario(scenario_id)
+        if new_sc:
+            self.load_scenarios(current_selected=new_sc["id"])
+            self.select_scenario(new_sc["id"])
+            self.append_log("SUCCESS", f"Duplicated scenario to '{new_sc['name']}' ({new_sc['file_name']})")
+
+    def rename_scenario(self, scenario_id: str):
+        sc = self.catalog.get_scenario(scenario_id)
+        if not sc:
+            return
+        new_name, ok = QInputDialog.getText(self, "Rename Script", "Enter new script name:", text=sc.get("name", ""))
+        if ok and new_name.strip():
+            self.catalog.rename_scenario(scenario_id, new_name.strip())
+            self.load_scenarios(current_selected=scenario_id)
+            self.select_scenario(scenario_id)
+            self.append_log("INFO", f"Renamed script to '{new_name.strip()}'")
+
+    def delete_scenario(self, scenario_id: str):
+        sc = self.catalog.get_scenario(scenario_id)
+        if not sc:
+            return
+        name = sc.get("name", "this script")
+        res = QMessageBox.question(
+            self,
+            "Delete Script",
+            f"Are you sure you want to delete script '{name}'?\nThis will remove the test file and catalog entry.",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if res == QMessageBox.Yes:
+            self.catalog.delete_scenario(scenario_id, delete_file=True)
+            self.append_log("INFO", f"Deleted test script '{name}'")
+            self.load_scenarios()
+
+    def delete_current_scenario(self):
+        if not getattr(self, "selected_scenario_id", None):
+            self.append_log("WARNING", "No scenario selected to delete.")
+            return
+        self.delete_scenario(self.selected_scenario_id)
+
     def on_record_clicked(self):
         if self.recorder and self.recorder.is_recording:
             self.append_log("INFO", "Stopping active recording and synthesizing Page Objects...")
@@ -4670,43 +5010,52 @@ class ConduitMainWindow(QMainWindow):
         dlg = RecordDialog(self)
         if dlg.exec() == QDialog.Accepted:
             name, url, tags = dlg.get_data()
-            self._current_recording_meta = {
-                "name": name,
-                "url": url,
-                "tags": tags,
-                "browser": self.selected_browser
+            self.start_recording_flow(name=name, url=url, tags=tags)
+
+    def start_recording_flow(self, name: str, url: str, tags: list):
+        if self.recorder and self.recorder.is_recording:
+            self.append_log("INFO", "Stopping active recording and synthesizing Page Objects...")
+            self.status_lbl.setText("Stopping recording session...")
+            self.recorder.stop_recording()
+            return
+
+        self._current_recording_meta = {
+            "name": name,
+            "url": url,
+            "tags": tags,
+            "browser": self.selected_browser
+        }
+
+        self.btn_record_flow.setText("■ Stop & Save Recording")
+        self.btn_record_flow.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #dc2626, stop:1 #ef4444);
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 18px;
+                border-radius: 8px;
+                border: none;
             }
+            QPushButton:hover {
+                background: #b91c1c;
+            }
+        """)
+        self.status_lbl.setText(f"● Recording '{name}' in browser... Click 'Stop & Save Recording' or close browser when done")
+        self.append_log("INFO", f"Launching browser recorder for '{name}' on {url}...")
 
-            self.btn_record_flow.setText("■ Stop & Save Recording")
-            self.btn_record_flow.setStyleSheet("""
-                QPushButton {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #dc2626, stop:1 #ef4444);
-                    color: #ffffff;
-                    font-weight: bold;
-                    font-size: 13px;
-                    padding: 8px 18px;
-                    border-radius: 8px;
-                    border: none;
-                }
-                QPushButton:hover {
-                    background: #b91c1c;
-                }
-            """)
-            self.status_lbl.setText(f"● Recording '{name}' in browser... Click 'Stop & Save Recording' or close browser when done")
-            self.append_log("INFO", f"Launching browser recorder for '{name}' on {url}...")
+        def _on_action(step_data):
+            self.bridge.action_recorded_signal.emit(step_data)
 
-            def _on_action(step_data):
-                self.bridge.action_recorded_signal.emit(step_data)
+        def _on_finished(actions):
+            self.bridge.recording_finished_signal.emit(actions)
 
-            def _on_finished(actions):
-                self.bridge.recording_finished_signal.emit(actions)
-
-            self.recorder = BrowserRecorder(
-                on_action_recorded=_on_action,
-                on_recording_finished=_on_finished
-            )
-            self.recorder.start_recording(initial_url=url, browser_channel=self.selected_browser)
-            self.append_log("INFO", "Recording active in browser. Perform actions or Alt+Click to assert.")
+        self.recorder = BrowserRecorder(
+            on_action_recorded=_on_action,
+            on_recording_finished=_on_finished
+        )
+        self.recorder.start_recording(initial_url=url, browser_channel=self.selected_browser)
+        self.append_log("INFO", "Recording active in browser. Perform actions or Alt+Click to assert.")
 
     def on_action_recorded(self, step_data: dict):
         desc = step_data.get("human_description", "")

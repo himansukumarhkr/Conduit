@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 from typing import List, Dict, Any, Optional
@@ -145,6 +146,108 @@ def test_data():
         self._write_scenario_files(target)
         self.save_catalog()
         return target
+
+    def create_empty_scenario(self, name: str, tags: Optional[List[str]] = None, base_url: str = "https://example.com") -> Dict[str, Any]:
+        slug = re.sub(r"[^a-zA-Z0-9]+", "_", name.strip().lower()).strip("_")
+        if not slug:
+            slug = "custom_flow"
+        file_name = f"test_{slug}.py"
+        target_path = os.path.join(self.tests_dir, file_name)
+        counter = 1
+        while os.path.exists(target_path):
+            file_name = f"test_{slug}_{counter}.py"
+            target_path = os.path.join(self.tests_dir, file_name)
+            counter += 1
+
+        fn_name = f"test_{slug}"
+        tags_list = tags if tags is not None else ["@smoke"]
+        tag_decorators = "\n".join([f"@pytest.mark.{t.lstrip('@')}" for t in tags_list if t.strip()])
+        if tag_decorators:
+            tag_decorators += "\n"
+
+        code = f'''import pytest
+from playwright.sync_api import Page, expect
+
+{tag_decorators}def {fn_name}(page: Page):
+    page.goto("{base_url}")
+'''
+
+        steps = [
+            {
+                "human_description": f"1. Navigate to {base_url}",
+                "code": f'page.goto("{base_url}")',
+                "action": "navigate",
+                "value": base_url,
+                "url": base_url
+            }
+        ]
+
+        scenario = {
+            "id": f"sc_{int(time.time() * 1000)}",
+            "name": name,
+            "tags": tags_list,
+            "last_execution": "Never",
+            "status": "Ready",
+            "duration": "--",
+            "file_name": file_name,
+            "steps": steps,
+            "code": code,
+            "pages": []
+        }
+        return self.add_or_update_scenario(scenario)
+
+    def delete_scenario(self, scenario_id: str, delete_file: bool = True) -> bool:
+        sc = self.get_scenario(scenario_id)
+        if not sc:
+            return False
+        self.scenarios = [s for s in self.scenarios if s.get("id") != scenario_id]
+        if delete_file:
+            file_name = sc.get("file_name")
+            if file_name:
+                fpath = os.path.join(self.tests_dir, file_name)
+                if os.path.exists(fpath):
+                    try:
+                        os.remove(fpath)
+                    except Exception:
+                        pass
+        self.save_catalog()
+        return True
+
+    def duplicate_scenario(self, scenario_id: str) -> Optional[Dict[str, Any]]:
+        sc = self.get_scenario(scenario_id)
+        if not sc:
+            return None
+        new_name = f"{sc.get('name', 'Scenario')} (Copy)"
+        slug = re.sub(r"[^a-zA-Z0-9]+", "_", new_name.strip().lower()).strip("_")
+        file_name = f"test_{slug}.py"
+        target_path = os.path.join(self.tests_dir, file_name)
+        counter = 1
+        while os.path.exists(target_path):
+            file_name = f"test_{slug}_{counter}.py"
+            target_path = os.path.join(self.tests_dir, file_name)
+            counter += 1
+
+        new_sc = dict(sc)
+        new_sc["id"] = f"sc_{int(time.time() * 1000)}"
+        new_sc["name"] = new_name
+        new_sc["file_name"] = file_name
+        new_sc["last_execution"] = "Never"
+        new_sc["status"] = "Ready"
+        new_sc["duration"] = "--"
+        if "steps" in sc:
+            new_sc["steps"] = [dict(st) for st in sc["steps"]]
+        if "pages" in sc:
+            new_sc["pages"] = [dict(p) for p in sc["pages"]]
+
+        return self.add_or_update_scenario(new_sc)
+
+    def rename_scenario(self, scenario_id: str, new_name: str) -> Optional[Dict[str, Any]]:
+        sc = self.get_scenario(scenario_id)
+        if not sc:
+            return None
+        sc["name"] = new_name
+        self.save_catalog()
+        return sc
 
     def _write_scenario_files(self, sc: Dict[str, Any]):
         file_name = sc.get("file_name")
