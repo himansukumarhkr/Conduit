@@ -18,30 +18,32 @@ RECORDER_INJECTED_SCRIPT = """
     let isProgrammaticFill = false;
 
     function flushActiveInput() {
-        if (debounceTimer) {
-            clearTimeout(debounceTimer);
-            debounceTimer = null;
-        }
-        if (!lastActiveElement && document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
-            lastActiveElement = document.activeElement;
-            lastTypedValue = document.activeElement.value !== undefined ? document.activeElement.value : (document.activeElement.innerText || '');
-        }
-        if (lastActiveElement) {
-            const currentVal = lastActiveElement.value !== undefined ? lastActiveElement.value : (lastActiveElement.innerText || '');
-            const valToRecord = currentVal !== '' ? currentVal : lastTypedValue;
-            if (valToRecord !== '') {
-                const meta = getElementMeta(lastActiveElement);
-                (window.__conduit_record__ || window.__testflow_record__)({
-                    action: 'fill',
-                    meta: meta,
-                    value: valToRecord,
-                    url: window.location.href,
-                    timestamp: Date.now()
-                });
+        try {
+            if (debounceTimer) {
+                clearTimeout(debounceTimer);
+                debounceTimer = null;
             }
-            lastActiveElement = null;
-            lastTypedValue = '';
-        }
+            if (!lastActiveElement && document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+                lastActiveElement = document.activeElement;
+                lastTypedValue = document.activeElement.value !== undefined ? document.activeElement.value : (document.activeElement.innerText || '');
+            }
+            if (lastActiveElement) {
+                const currentVal = lastActiveElement.value !== undefined ? lastActiveElement.value : (lastActiveElement.innerText || '');
+                const valToRecord = currentVal !== '' ? currentVal : lastTypedValue;
+                if (valToRecord !== '') {
+                    const meta = getElementMeta(lastActiveElement);
+                    (window.__conduit_record__ || window.__testflow_record__)({
+                        action: 'fill',
+                        meta: meta,
+                        value: valToRecord,
+                        url: window.location.href,
+                        timestamp: Date.now()
+                    });
+                }
+                lastActiveElement = null;
+                lastTypedValue = '';
+            }
+        } catch (err) {}
     }
     window.__conduit_flush__ = flushActiveInput;
 
@@ -190,132 +192,163 @@ RECORDER_INJECTED_SCRIPT = """
     }, 1000);
 
     function getElementMeta(el) {
-        if (!el || el === document.body || el === document.documentElement) {
-            return { tag: 'body', attributes: {}, text: '', role: '', aria_label: '', placeholder: '', css_selector: 'body' };
-        }
-        const attrs = {};
-        for (let i = 0; i < el.attributes.length; i++) {
-            attrs[el.attributes[i].name] = el.attributes[i].value;
-        }
-
-        let labelText = '';
-        if (el.labels && el.labels.length > 0) {
-            labelText = (el.labels[0].innerText || el.labels[0].textContent || '').trim();
-        } else if (el.id) {
-            try {
-                const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-                if (lbl) labelText = (lbl.innerText || lbl.textContent || '').trim();
-            } catch (err) {}
-        }
-        if (!labelText && el.closest('label')) {
-            labelText = (el.closest('label').innerText || el.closest('label').textContent || '').trim();
-        }
-        if (!labelText && el.parentElement) {
-            const prev = el.previousElementSibling;
-            if (prev && prev.tagName.toLowerCase() === 'label') {
-                labelText = (prev.innerText || prev.textContent || '').trim();
+        try {
+            if (!el || el === document.body || el === document.documentElement) {
+                return { tag: 'body', attributes: {}, text: '', role: '', aria_label: '', placeholder: '', css_selector: 'body' };
             }
+            const attrs = {};
+            if (el.attributes) {
+                for (let i = 0; i < el.attributes.length; i++) {
+                    attrs[el.attributes[i].name] = el.attributes[i].value;
+                }
+            }
+
+            let labelText = '';
+            if (el.labels && el.labels.length > 0) {
+                labelText = (el.labels[0].innerText || el.labels[0].textContent || '').trim();
+            } else if (el.id) {
+                try {
+                    const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+                    if (lbl) labelText = (lbl.innerText || lbl.textContent || '').trim();
+                } catch (err) {}
+            }
+            if (!labelText && el.closest) {
+                try {
+                    const parentLbl = el.closest('label');
+                    if (parentLbl) labelText = (parentLbl.innerText || parentLbl.textContent || '').trim();
+                } catch (err) {}
+            }
+            if (!labelText && el.parentElement) {
+                const prev = el.previousElementSibling;
+                if (prev && prev.tagName && prev.tagName.toLowerCase() === 'label') {
+                    labelText = (prev.innerText || prev.textContent || '').trim();
+                }
+            }
+
+            const ariaLabel = (el.getAttribute && el.getAttribute('aria-label')) || labelText || '';
+            const role = (el.getAttribute && el.getAttribute('role')) || (el.tagName && el.tagName.toLowerCase() === 'input' ? (attrs.type === 'password' ? 'password' : 'textbox') : (el.tagName ? el.tagName.toLowerCase() : 'element'));
+
+            return {
+                tag: el.tagName ? el.tagName.toLowerCase() : 'element',
+                attributes: attrs,
+                text: (el.innerText || el.textContent || '').trim().slice(0, 80),
+                role: role,
+                aria_label: ariaLabel,
+                placeholder: (el.getAttribute && el.getAttribute('placeholder')) || '',
+                css_selector: getUniqueCssSelector(el)
+            };
+        } catch (err) {
+            return { tag: 'element', attributes: {}, text: '', role: '', aria_label: '', placeholder: '', css_selector: 'body' };
         }
-
-        const ariaLabel = el.getAttribute('aria-label') || labelText || '';
-        const role = el.getAttribute('role') || (el.tagName.toLowerCase() === 'input' ? (attrs.type === 'password' ? 'password' : 'textbox') : el.tagName.toLowerCase());
-
-        return {
-            tag: el.tagName.toLowerCase(),
-            attributes: attrs,
-            text: (el.innerText || el.textContent || '').trim().slice(0, 80),
-            role: role,
-            aria_label: ariaLabel,
-            placeholder: el.getAttribute('placeholder') || '',
-            css_selector: getUniqueCssSelector(el)
-        };
     }
 
     function getUniqueCssSelector(el) {
-        if (el.id) return `#${CSS.escape(el.id)}`;
-        if (el.getAttribute('data-testid')) return `[data-testid="${CSS.escape(el.getAttribute('data-testid'))}"]`;
-        let path = [];
-        while (el && el.nodeType === Node.ELEMENT_NODE) {
-            let selector = el.nodeName.toLowerCase();
-            if (el.id) {
-                selector += `#${CSS.escape(el.id)}`;
-                path.unshift(selector);
-                break;
-            } else {
-                let sibling = el, nth = 1;
-                while (sibling = sibling.previousElementSibling) {
-                    if (sibling.nodeName.toLowerCase() === selector) nth++;
+        try {
+            if (!el || !el.nodeName) return 'body';
+            if (el.id) return `#${CSS.escape(el.id)}`;
+            if (el.getAttribute && el.getAttribute('data-testid')) return `[data-testid="${CSS.escape(el.getAttribute('data-testid'))}"]`;
+            let path = [];
+            let curr = el;
+            while (curr && curr.nodeType === Node.ELEMENT_NODE) {
+                let selector = curr.nodeName.toLowerCase();
+                if (curr.id) {
+                    selector += `#${CSS.escape(curr.id)}`;
+                    path.unshift(selector);
+                    break;
+                } else {
+                    let sibling = curr, nth = 1;
+                    while (sibling = sibling.previousElementSibling) {
+                        if (sibling.nodeName && sibling.nodeName.toLowerCase() === selector) nth++;
+                    }
+                    if (nth !== 1) selector += `:nth-of-type(${nth})`;
                 }
-                if (nth !== 1) selector += `:nth-of-type(${nth})`;
+                path.unshift(selector);
+                curr = curr.parentNode;
             }
-            path.unshift(selector);
-            el = el.parentNode;
+            return path.length > 0 ? path.join(' > ') : (el.tagName ? el.tagName.toLowerCase() : 'body');
+        } catch (err) {
+            return el && el.tagName ? el.tagName.toLowerCase() : 'body';
         }
-        return path.join(' > ');
     }
 
     document.addEventListener('focusin', (e) => {
-        if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-            lastTargetInput = e.target;
-        }
+        try {
+            if (!e || !e.target) return;
+            if (e.target.closest && (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__'))) return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                lastTargetInput = e.target;
+            }
+        } catch (err) {}
     }, true);
 
     document.addEventListener('input', (e) => {
-        if (isProgrammaticFill) return;
-        if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-            lastTargetInput = e.target;
-        }
-        if (lastActiveElement && lastActiveElement !== e.target) {
-            flushActiveInput();
-        }
-        lastActiveElement = e.target;
-        lastTypedValue = e.target.value !== undefined ? e.target.value : (e.target.innerText || '');
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-            flushActiveInput();
-        }, 300);
+        try {
+            if (isProgrammaticFill) return;
+            if (!e || !e.target) return;
+            if (e.target.closest && (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__'))) return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                lastTargetInput = e.target;
+            }
+            if (lastActiveElement && lastActiveElement !== e.target) {
+                flushActiveInput();
+            }
+            lastActiveElement = e.target;
+            lastTypedValue = e.target.value !== undefined ? e.target.value : (e.target.innerText || '');
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                flushActiveInput();
+            }, 300);
+        } catch (err) {}
     }, true);
 
     document.addEventListener('keydown', (e) => {
-        if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
-        if (e.key === 'Tab') {
-            flushActiveInput();
-        } else if (e.key === 'Enter') {
-            flushActiveInput();
-            const meta = getElementMeta(e.target);
-            (window.__conduit_record__ || window.__testflow_record__)({
-                action: 'press',
-                meta: meta,
-                value: 'Enter',
-                url: window.location.href,
-                timestamp: Date.now()
-            });
-        }
+        try {
+            if (!e || !e.target) return;
+            if (e.target.closest && (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__'))) return;
+            if (e.key === 'Tab') {
+                flushActiveInput();
+            } else if (e.key === 'Enter') {
+                flushActiveInput();
+                const meta = getElementMeta(e.target);
+                (window.__conduit_record__ || window.__testflow_record__)({
+                    action: 'press',
+                    meta: meta,
+                    value: 'Enter',
+                    url: window.location.href,
+                    timestamp: Date.now()
+                });
+            }
+        } catch (err) {}
     }, true);
 
     document.addEventListener('click', (e) => {
-        if (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__')) return;
+        try {
+            if (!e || !e.target) return;
+            if (e.target.closest && (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__'))) return;
 
-        flushActiveInput();
+            flushActiveInput();
 
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-            lastTargetInput = e.target;
-        }
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                lastTargetInput = e.target;
+            }
 
-        const meta = getElementMeta(e.target);
+            const meta = getElementMeta(e.target);
 
-        if (e.altKey) {
-            e.preventDefault();
-            e.stopPropagation();
-            showAssertionMenu(e.clientX, e.clientY, meta, e.target);
-            return;
-        }
+            if (e.altKey) {
+                e.preventDefault();
+                e.stopPropagation();
+                showAssertionMenu(e.clientX, e.clientY, meta, e.target);
+                return;
+            }
 
-        (window.__conduit_record__ || window.__testflow_record__)({
-            action: 'click',
-            meta: meta,
+            (window.__conduit_record__ || window.__testflow_record__)({
+                action: 'click',
+                meta: meta,
+                url: window.location.href,
+                timestamp: Date.now()
+            });
+        } catch (err) {}
+    }, true);
             url: window.location.href,
             timestamp: Date.now()
         });
@@ -491,78 +524,135 @@ class BrowserRecorder:
 
                 self._page.goto(initial_url)
 
+                def _on_frame_navigated(frame):
+                    try:
+                        if self._page and frame == self._page.main_frame:
+                            current_url = frame.url
+                            if current_url and not current_url.startswith(("about:", "chrome:", "edge:")):
+                                with self._lock:
+                                    if self.recorded_actions:
+                                        last_act = self.recorded_actions[-1]
+                                        if last_act.get("action") == "navigate" and last_act.get("url") != current_url:
+                                            last_act["url"] = current_url
+                                            last_act["value"] = current_url
+                                            last_act["human_description"] = f"Navigate to {current_url}"
+                    except Exception:
+                        pass
+
+                self._page.on("framenavigated", _on_frame_navigated)
+
                 while self._is_recording and self._context and self._context.pages:
-                    time.sleep(0.3)
+                    try:
+                        pages = self._context.pages
+                        if pages and not pages[-1].is_closed():
+                            pages[-1].wait_for_timeout(250)
+                        else:
+                            time.sleep(0.1)
+                    except Exception:
+                        time.sleep(0.1)
 
             except Exception as e:
                 print(f"[Conduit Recorder Error]: {e}")
             finally:
-                self.stop_recording()
+                try:
+                    pages = self._context.pages if self._context else []
+                    if pages and not pages[-1].is_closed():
+                        try:
+                            pages[-1].evaluate("if (window.__conduit_flush__) window.__conduit_flush__();")
+                            pages[-1].wait_for_timeout(150)
+                        except Exception:
+                            pass
+                    if self._context:
+                        self._context.close()
+                    if self._browser:
+                        self._browser.close()
+                    if self._playwright:
+                        self._playwright.stop()
+                except Exception:
+                    pass
+                finally:
+                    self._browser = None
+                    self._context = None
+                    self._page = None
+                    self._playwright = None
+
+                with self._lock:
+                    if self.on_recording_finished and not self._finished_notified:
+                        self._finished_notified = True
+                        actions_snapshot = list(self.recorded_actions)
+                        self.on_recording_finished(actions_snapshot)
 
         self._thread = threading.Thread(target=_run, daemon=True)
         self._thread.start()
 
     def _handle_raw_event(self, source, event_data: Dict[str, Any]):
-        act_type = event_data.get("action")
-        if act_type == "finish":
-            threading.Thread(target=self.stop_recording, daemon=True).start()
-            return
+        try:
+            act_type = event_data.get("action")
+            if act_type == "finish":
+                threading.Thread(target=self.stop_recording, daemon=True).start()
+                return
 
-        with self._lock:
-            meta = event_data.get("meta", {})
-            val = event_data.get("value", "")
-            url = event_data.get("url", "")
-            var_name = event_data.get("variable_name")
+            with self._lock:
+                meta = event_data.get("meta", {})
+                val = event_data.get("value", "")
+                url = event_data.get("url", "")
+                var_name = event_data.get("variable_name")
 
-            selector_info = SelectorEngine.rank_selector(meta)
-            human_desc = SelectorEngine.generate_human_step(act_type, selector_info, val)
-            if var_name:
-                human_desc = f"Fill '{selector_info.get('display')}' with variable '{var_name}'"
+                selector_info = SelectorEngine.rank_selector(meta)
+                human_desc = SelectorEngine.generate_human_step(act_type, selector_info, val)
+                if var_name:
+                    human_desc = f"Fill '{selector_info.get('display')}' with variable '{var_name}'"
 
-            if act_type == "fill" and self.recorded_actions:
-                last_action = self.recorded_actions[-1]
-                if last_action.get("action") == "click":
-                    last_css = last_action.get("meta", {}).get("css_selector")
-                    curr_css = meta.get("css_selector")
-                    if (last_css and curr_css and last_css == curr_css) or (last_action.get("selector_info", {}).get("code") == selector_info.get("code") and last_action.get("selector_info", {}).get("var_name") == selector_info.get("var_name")):
-                        self.recorded_actions.pop()
+                if act_type == "fill" and self.recorded_actions:
+                    last_action = self.recorded_actions[-1]
+                    if last_action.get("action") == "click":
+                        last_css = last_action.get("meta", {}).get("css_selector")
+                        curr_css = meta.get("css_selector")
+                        last_sel = last_action.get("selector_info") or {}
+                        curr_sel = selector_info or {}
+                        if (last_css and curr_css and last_css == curr_css) or (last_sel.get("code") and last_sel.get("code") == curr_sel.get("code")):
+                            self.recorded_actions.pop()
 
-            if act_type == "fill" and self.recorded_actions:
-                last_action = self.recorded_actions[-1]
-                same_element = False
-                if last_action.get("action") == "fill":
-                    last_css = last_action.get("meta", {}).get("css_selector")
-                    curr_css = meta.get("css_selector")
-                    if last_css and curr_css and last_css == curr_css:
-                        same_element = True
-                    elif last_action.get("selector_info", {}).get("code") == selector_info.get("code") and last_action.get("selector_info", {}).get("var_name") == selector_info.get("var_name"):
-                        same_element = True
+                if act_type == "fill" and self.recorded_actions:
+                    last_action = self.recorded_actions[-1]
+                    same_element = False
+                    if last_action.get("action") == "fill":
+                        last_css = last_action.get("meta", {}).get("css_selector")
+                        curr_css = meta.get("css_selector")
+                        last_sel = last_action.get("selector_info") or {}
+                        curr_sel = selector_info or {}
+                        if last_css and curr_css and last_css == curr_css:
+                            same_element = True
+                        elif last_sel.get("code") and last_sel.get("code") == curr_sel.get("code"):
+                            same_element = True
 
-                if same_element:
-                    last_action["value"] = val
-                    if var_name:
-                        last_action["variable_name"] = var_name
-                        last_action["human_description"] = human_desc
-                    elif not last_action.get("variable_name"):
-                        last_action["human_description"] = human_desc
-                    last_action["timestamp"] = event_data.get("timestamp", time.time())
-                    if self.on_action_recorded:
-                        self.on_action_recorded(last_action)
-                    return
+                    if same_element:
+                        last_action["value"] = val
+                        if var_name:
+                            last_action["variable_name"] = var_name
+                            last_action["human_description"] = human_desc
+                        elif not last_action.get("variable_name"):
+                            last_action["human_description"] = human_desc
+                        last_action["timestamp"] = event_data.get("timestamp", time.time())
+                        if self.on_action_recorded:
+                            self.on_action_recorded(last_action)
+                        return
 
-            step_data = {
-                "action": act_type,
-                "url": url,
-                "value": val,
-                "meta": meta,
-                "selector_info": selector_info,
-                "human_description": human_desc,
-                "timestamp": event_data.get("timestamp", time.time())
-            }
-            if var_name:
-                step_data["variable_name"] = var_name
+                step_data = {
+                    "action": act_type,
+                    "url": url,
+                    "value": val,
+                    "meta": meta,
+                    "selector_info": selector_info,
+                    "human_description": human_desc,
+                    "timestamp": event_data.get("timestamp", time.time())
+                }
+                if var_name:
+                    step_data["variable_name"] = var_name
 
-            self._record_step(step_data)
+                self._record_step(step_data)
+        except Exception as e:
+            print(f"[Conduit Event Error]: {e}")
 
     def _record_step(self, step_data: Dict[str, Any]):
         self.recorded_actions.append(step_data)
@@ -571,31 +661,6 @@ class BrowserRecorder:
 
     def stop_recording(self) -> List[Dict[str, Any]]:
         self._is_recording = False
-        try:
-            if self._page and not self._page.is_closed():
-                try:
-                    self._page.evaluate("if (window.__conduit_flush__) window.__conduit_flush__();")
-                    time.sleep(0.15)
-                except Exception:
-                    pass
-            if self._context:
-                self._context.close()
-            if self._browser:
-                self._browser.close()
-            if self._playwright:
-                self._playwright.stop()
-        except Exception:
-            pass
-        finally:
-            self._browser = None
-            self._context = None
-            self._page = None
-            self._playwright = None
-
-        with self._lock:
-            if self.on_recording_finished and not self._finished_notified:
-                self._finished_notified = True
-                actions_snapshot = list(self.recorded_actions)
-                self.on_recording_finished(actions_snapshot)
-
+        if self._thread and threading.current_thread() != self._thread:
+            self._thread.join(timeout=4.0)
         return self.recorded_actions

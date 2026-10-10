@@ -432,6 +432,8 @@ class NewScriptDialog(QDialog):
     def get_data(self):
         name = self.name_edit.text().strip() or "Custom Test Journey"
         url = self.url_edit.text().strip() or "https://demo.playwright.dev/todomvc/"
+        if url and not url.startswith(("http://", "https://")):
+            url = f"https://{url}"
         raw_tags = self.tags_edit.text().replace(",", " ").split()
         tags = [t if t.startswith("@") else f"@{t}" for t in raw_tags] if raw_tags else ["@smoke"]
         mode = self.mode_combo.currentData()
@@ -527,6 +529,8 @@ class RecordDialog(QDialog):
     def get_data(self):
         name = self.name_edit.text().strip() or "Recorded Flow"
         url = self.url_edit.text().strip() or "https://demo.playwright.dev/todomvc/"
+        if url and not url.startswith(("http://", "https://")):
+            url = f"https://{url}"
         tags = [t.strip() for t in self.tags_edit.text().split(",") if t.strip()]
         return name, url, tags
 
@@ -5018,6 +5022,10 @@ class ConduitMainWindow(QMainWindow):
             self.status_lbl.setText("Stopping recording session...")
             self.recorder.stop_recording()
             return
+
+        url = (url or "https://demo.playwright.dev/todomvc/").strip()
+        if not url.startswith(("http://", "https://")):
+            url = f"https://{url}"
 
         self._current_recording_meta = {
             "name": name,

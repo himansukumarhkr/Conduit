@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication
 from app.core.runner import TestRunner
 from app.core.recorder import BrowserRecorder
 from app.core.ast_normalizer import ASTNormalizer
-from app.ui.main_window import CodeEditor
+from app.ui.main_window import CodeEditor, RecordDialog, NewScriptDialog
 
 _app = QApplication.instance() or QApplication(sys.argv)
 
@@ -192,3 +192,16 @@ def test_code_editor_auto_indentation():
     editor.keyPressEvent(key_bs)
     lines = editor.toPlainText().split("\n")
     assert lines[1] == "    "
+
+
+def test_record_dialog_url_normalization():
+    dlg = RecordDialog()
+    dlg.url_edit.setText("facebook.com")
+    name, url, tags = dlg.get_data()
+    assert url == "https://facebook.com"
+
+    dlg2 = NewScriptDialog()
+    dlg2.url_edit.setText("www.facebook.com")
+    name2, url2, tags2, mode = dlg2.get_data()
+    assert url2 == "https://www.facebook.com"
+
