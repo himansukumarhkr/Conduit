@@ -3,7 +3,7 @@ import tempfile
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 from app.ui.main_window import (
-    ConduitMainWindow, ToggleSwitch, SettingsDialog, SuitesDialog, HistoryDialog
+    ConduitMainWindow, ToggleSwitch, SettingsDialog, SuitesDialog, HistoryDialog, StepEditorDialog
 )
 
 
@@ -126,3 +126,43 @@ def test_main_window_components():
         assert win.steps_container_layout.count() > 0
 
         win.close()
+
+
+def test_step_editor_dialog_prepopulation():
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    app = QApplication.instance() or QApplication([])
+
+    step_fill = {
+        "human_description": "Type 'testtest' into 'password'",
+        "code": "page.fill_password('testtest')"
+    }
+    dlg = StepEditorDialog(step_data=step_fill)
+    assert dlg.action_combo.currentData() == "fill"
+    assert dlg.action_combo.currentText() == "Fill / Type Text"
+    assert dlg.val_edit.text() == "testtest"
+    assert "password" in dlg.selector_edit.text()
+    assert dlg.var_name_edit.text() == "password"
+    assert dlg.desc_edit.text() == "Type 'testtest' into 'password'"
+
+    dlg.on_save()
+    saved = dlg.get_step_data()
+    assert saved["action"] == "fill"
+    assert saved["value"] == "testtest"
+    assert saved["selector_info"]["var_name"] == "password"
+
+    step_click = {
+        "human_description": "Click 'Submit' button",
+        "code": "login_page.click_submit()"
+    }
+    dlg_click = StepEditorDialog(step_data=step_click)
+    assert dlg_click.action_combo.currentData() == "click"
+    assert dlg_click.action_combo.currentText() == "Click Element"
+    assert "submit" in dlg_click.selector_edit.text().lower()
+
+    step_nav = {
+        "human_description": "Navigate to https://example.com",
+        "code": 'page.goto("https://example.com")'
+    }
+    dlg_nav = StepEditorDialog(step_data=step_nav)
+    assert dlg_nav.action_combo.currentData() == "navigate"
+    assert dlg_nav.val_edit.text() == "https://example.com"

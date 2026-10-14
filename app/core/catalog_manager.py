@@ -95,6 +95,15 @@ def test_data():
             with open(conftest_path, "w", encoding="utf-8") as f:
                 f.write(conftest_code)
 
+    def _normalize_scenarios(self):
+        from app.core.ast_normalizer import ASTNormalizer
+        for sc in self.scenarios:
+            steps = sc.get("steps", [])
+            normalized_steps = []
+            for st in steps:
+                normalized_steps.append(ASTNormalizer.normalize_step(st))
+            sc["steps"] = normalized_steps
+
     def load_catalog(self):
         target_file = self.catalog_file
         if not os.path.exists(target_file):
@@ -107,11 +116,13 @@ def test_data():
                 with open(target_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.scenarios = data.get("scenarios", [])
+                    self._normalize_scenarios()
                     return
             except Exception as e:
                 print(f"[Catalog Load Error]: {e}")
 
         self.scenarios = self._get_seed_scenarios()
+        self._normalize_scenarios()
         self.save_catalog()
 
     def save_catalog(self):
@@ -133,6 +144,10 @@ def test_data():
         return None
 
     def add_or_update_scenario(self, scenario: Dict[str, Any]) -> Dict[str, Any]:
+        if "steps" in scenario:
+            from app.core.ast_normalizer import ASTNormalizer
+            scenario["steps"] = [ASTNormalizer.normalize_step(st) for st in scenario["steps"]]
+
         existing = self.get_scenario(scenario.get("id"))
         if existing:
             existing.update(scenario)

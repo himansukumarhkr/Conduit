@@ -125,6 +125,10 @@ def test_checkout_journey(page):
     assert "@smoke" in parsed["tags"]
     assert len(parsed["steps"]) == 3
     assert parsed["steps"][0]["human_description"] == "Navigate to https://shop.example.com"
+    assert parsed["steps"][0]["action"] == "navigate"
+    assert parsed["steps"][1]["action"] == "click"
+    assert parsed["steps"][2]["action"] == "fill"
+    assert parsed["steps"][2]["value"] == "DISCOUNT50"
 
 
 def test_catalog_manager():
@@ -133,5 +137,7 @@ def test_catalog_manager():
         scenarios = cm.get_all_scenarios()
         assert len(scenarios) >= 5
         assert scenarios[0]["name"] == "User Login Flow"
+        assert scenarios[0]["steps"][1]["action"] == "fill"
+        assert scenarios[0]["steps"][1]["value"] == "admin@conduit.io"
         assert os.path.exists(os.path.join(tmp_dir, "conduit.json"))
         assert os.path.exists(os.path.join(tmp_dir, "tests", "test_user_login_flow.py"))

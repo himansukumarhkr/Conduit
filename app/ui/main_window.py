@@ -538,7 +538,7 @@ class RecordDialog(QDialog):
 class StepEditorDialog(QDialog):
     def __init__(self, step_data: dict = None, parent=None):
         super().__init__(parent)
-        self.step_data = dict(step_data or {})
+        self.step_data = ASTNormalizer.normalize_step(step_data or {})
         self.setWindowTitle("Edit Flow Step" if step_data else "Add New Flow Step")
         self.resize(540, 560)
         self.setStyleSheet("""
@@ -629,13 +629,22 @@ class StepEditorDialog(QDialog):
         for label, act_key in self.actions_map:
             self.action_combo.addItem(label, act_key)
 
+        desc = self.step_data.get("human_description", "")
         cur_act = self.step_data.get("action", "click")
+
         for i, (_, k) in enumerate(self.actions_map):
             if k == cur_act:
                 self.action_combo.setCurrentIndex(i)
                 break
         self.action_combo.currentIndexChanged.connect(self._on_action_changed)
         layout.addWidget(self.action_combo)
+
+        cur_sel = self.step_data.get("selector_info") or {}
+        strat_key = cur_sel.get("strategy", "css").lower()
+        strat_map = {"css": 0, "text": 1, "id": 2, "testid": 3, "role": 4, "xpath": 5}
+
+        display_val = cur_sel.get("display", "") or cur_sel.get("var_name", "")
+        var_name = cur_sel.get("var_name", "")
 
         self.selector_frame = QWidget()
         s_layout = QVBoxLayout(self.selector_frame)
@@ -645,33 +654,31 @@ class StepEditorDialog(QDialog):
         s_layout.addWidget(QLabel("Locator Strategy"))
         self.strat_combo = QComboBox()
         self.strat_combo.addItems(["CSS / Playwright Selector", "Text", "ID", "data-testid", "Role", "XPath"])
-        cur_sel = self.step_data.get("selector_info") or {}
-        strat_key = cur_sel.get("strategy", "css").lower()
-        strat_map = {"css": 0, "text": 1, "id": 2, "testid": 3, "role": 4, "xpath": 5}
         self.strat_combo.setCurrentIndex(strat_map.get(strat_key, 0))
         s_layout.addWidget(self.strat_combo)
 
         s_layout.addWidget(QLabel("Target Selector / Element Query"))
-        display_val = cur_sel.get("display", "") or cur_sel.get("var_name", "")
         self.selector_edit = QLineEdit(display_val)
         self.selector_edit.setPlaceholderText("e.g. button.submit-btn, #login, Sign In, [data-testid='btn']")
         s_layout.addWidget(self.selector_edit)
 
         s_layout.addWidget(QLabel("Element Variable Name (POM Class Attribute)"))
-        self.var_name_edit = QLineEdit(cur_sel.get("var_name", ""))
+        self.var_name_edit = QLineEdit(var_name)
         self.var_name_edit.setPlaceholderText("e.g. submit_button, username_input")
         s_layout.addWidget(self.var_name_edit)
 
         layout.addWidget(self.selector_frame)
 
+        cur_val = self.step_data.get("value", "")
+
         self.val_lbl = QLabel("Value / Parameter")
         layout.addWidget(self.val_lbl)
-        self.val_edit = QLineEdit(str(self.step_data.get("value", "")))
+        self.val_edit = QLineEdit(str(cur_val))
         self.val_edit.setPlaceholderText("e.g. test string, {{username}}, https://..., 1000")
         layout.addWidget(self.val_edit)
 
         layout.addWidget(QLabel("Step Description (Leave blank to auto-generate)"))
-        self.desc_edit = QLineEdit(self.step_data.get("human_description", ""))
+        self.desc_edit = QLineEdit(desc)
         self.desc_edit.setPlaceholderText("e.g. Click 'submit_button' button")
         layout.addWidget(self.desc_edit)
 
