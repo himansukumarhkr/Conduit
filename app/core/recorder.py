@@ -17,13 +17,36 @@ RECORDER_INJECTED_SCRIPT = """
     let debounceTimer = null;
     let isProgrammaticFill = false;
 
+    function sendConduitEvent(payload) {
+        const fn = window.__conduit_record__ || window.__testflow_record__;
+        if (typeof fn === 'function') {
+            try {
+                fn(payload);
+            } catch(e) {}
+        } else {
+            let retries = 0;
+            const timer = setInterval(() => {
+                retries++;
+                const readyFn = window.__conduit_record__ || window.__testflow_record__;
+                if (typeof readyFn === 'function') {
+                    clearInterval(timer);
+                    try {
+                        readyFn(payload);
+                    } catch(e) {}
+                } else if (retries > 40) {
+                    clearInterval(timer);
+                }
+            }, 50);
+        }
+    }
+
     function flushActiveInput() {
         try {
             if (debounceTimer) {
                 clearTimeout(debounceTimer);
                 debounceTimer = null;
             }
-            if (!lastActiveElement && document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.isContentEditable || document.activeElement.getAttribute('role') === 'textbox')) {
+            if (!lastActiveElement && document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.isContentEditable || (document.activeElement.getAttribute && document.activeElement.getAttribute('role') === 'textbox'))) {
                 lastActiveElement = document.activeElement;
                 lastTypedValue = document.activeElement.value !== undefined ? document.activeElement.value : (document.activeElement.innerText || '');
             }
@@ -32,7 +55,7 @@ RECORDER_INJECTED_SCRIPT = """
                 const valToRecord = currentVal !== '' ? currentVal : lastTypedValue;
                 if (valToRecord !== '') {
                     const meta = getElementMeta(lastActiveElement);
-                    (window.__conduit_record__ || window.__testflow_record__)({
+                    sendConduitEvent({
                         action: 'fill',
                         meta: meta,
                         value: valToRecord,
@@ -48,6 +71,7 @@ RECORDER_INJECTED_SCRIPT = """
     window.__conduit_flush__ = flushActiveInput;
 
     function initOverlay() {
+        if (window.self !== window.top) return;
         if (document.getElementById('__conduit_overlay__')) return;
         const container = document.body || document.documentElement;
         if (!container) return;
@@ -98,7 +122,7 @@ RECORDER_INJECTED_SCRIPT = """
                 e.preventDefault();
                 e.stopPropagation();
                 flushActiveInput();
-                (window.__conduit_record__ || window.__testflow_record__)({
+                sendConduitEvent({
                     action: 'finish',
                     timestamp: Date.now()
                 });
@@ -140,32 +164,52 @@ RECORDER_INJECTED_SCRIPT = """
 
     function fillVariableIntoInput(varName, value) {
         let target = lastTargetInput;
-        if (!target || !document.contains(target) || (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA')) {
-            if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+        const lowerVar = (varName || '').toLowerCase();
+        const isPass = lowerVar.includes('pass') || lowerVar.includes('pwd') || lowerVar.includes('secret');
+        const isUser = lowerVar.includes('user') || lowerVar.includes('email') || lowerVar.includes('login');
+
+        if (isPass) {
+            const passEl = document.querySelector('input[type="password"]');
+            if (passEl) target = passEl;
+        } else if (isUser && (!target || target.type === 'password')) {
+            const userEl = document.querySelector('input[type="email"], input[name*="user"], input[name*="email"], input[id*="user"], input[id*="email"], input[name="login"], input[type="text"]');
+            if (userEl) target = userEl;
+        }
+
+        if (!target || !document.contains(target) || !isInputLike(target)) {
+            if (document.activeElement && isInputLike(document.activeElement)) {
                 target = document.activeElement;
             }
         }
-        if (!target || !document.contains(target) || (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA')) {
-            const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea'));
-            if (inputs.length > 0) {
-                target = inputs[0];
+        if (!target || !document.contains(target) || !isInputLike(target)) {
+            const candidates = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, [contenteditable="true"], [role="textbox"]'));
+            if (candidates.length > 0) {
+                target = candidates[0];
             }
         }
         if (target) {
             target.focus();
             isProgrammaticFill = true;
             try {
-                const proto = target.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
-                const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-                if (nativeSetter) {
-                    nativeSetter.call(target, value);
+                if (target.isContentEditable) {
+                    target.innerText = value;
                 } else {
-                    target.value = value;
+                    const proto = target.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+                    const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                    if (nativeSetter) {
+                        nativeSetter.call(target, value);
+                    } else {
+                        target.value = value;
+                    }
                 }
             } catch (err) {
-                target.value = value;
+                try { target.value = value; } catch (e) {}
             }
-            target.dispatchEvent(new Event('input', { bubbles: true }));
+            try {
+                target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+            } catch (e) {
+                target.dispatchEvent(new Event('input', { bubbles: true }));
+            }
             target.dispatchEvent(new Event('change', { bubbles: true }));
             isProgrammaticFill = false;
 
@@ -178,7 +222,7 @@ RECORDER_INJECTED_SCRIPT = """
             }
 
             const meta = getElementMeta(target);
-            (window.__conduit_record__ || window.__testflow_record__)({
+            sendConduitEvent({
                 action: 'fill',
                 meta: meta,
                 value: value,
@@ -281,12 +325,38 @@ RECORDER_INJECTED_SCRIPT = """
         }
     }
 
+    function getEventTarget(e) {
+        if (!e) return null;
+        if (e.composedPath && typeof e.composedPath === 'function') {
+            const path = e.composedPath();
+            if (path && path.length > 0) return path[0];
+        }
+        return e.target;
+    }
+
+    function isInputLike(el) {
+        if (!el) return false;
+        const tag = (el.tagName || '').toUpperCase();
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
+        if (el.isContentEditable) return true;
+        if (el.getAttribute && el.getAttribute('role') === 'textbox') return true;
+        return false;
+    }
+
+    function getElementValue(el) {
+        if (!el) return '';
+        if (el.value !== undefined) return String(el.value);
+        if (el.innerText !== undefined) return String(el.innerText);
+        return String(el.textContent || '');
+    }
+
     document.addEventListener('focusin', (e) => {
         try {
-            if (!e || !e.target) return;
-            if (e.target.closest && (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__'))) return;
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-                lastTargetInput = e.target;
+            const t = getEventTarget(e);
+            if (!t) return;
+            if (t.closest && (t.closest('#__conduit_overlay__') || t.closest('#__conduit_context_menu__'))) return;
+            if (isInputLike(t)) {
+                lastTargetInput = t;
             }
         } catch (err) {}
     }, true);
@@ -294,16 +364,17 @@ RECORDER_INJECTED_SCRIPT = """
     document.addEventListener('input', (e) => {
         try {
             if (isProgrammaticFill) return;
-            if (!e || !e.target) return;
-            if (e.target.closest && (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__'))) return;
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-                lastTargetInput = e.target;
+            const t = getEventTarget(e);
+            if (!t) return;
+            if (t.closest && (t.closest('#__conduit_overlay__') || t.closest('#__conduit_context_menu__'))) return;
+            if (isInputLike(t)) {
+                lastTargetInput = t;
             }
-            if (lastActiveElement && lastActiveElement !== e.target) {
+            if (lastActiveElement && lastActiveElement !== t) {
                 flushActiveInput();
             }
-            lastActiveElement = e.target;
-            lastTypedValue = e.target.value !== undefined ? e.target.value : (e.target.innerText || '');
+            lastActiveElement = t;
+            lastTypedValue = getElementValue(t);
             if (debounceTimer) clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {
                 flushActiveInput();
@@ -313,14 +384,15 @@ RECORDER_INJECTED_SCRIPT = """
 
     document.addEventListener('keydown', (e) => {
         try {
-            if (!e || !e.target) return;
-            if (e.target.closest && (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__'))) return;
+            const t = getEventTarget(e);
+            if (!t) return;
+            if (t.closest && (t.closest('#__conduit_overlay__') || t.closest('#__conduit_context_menu__'))) return;
             if (e.key === 'Tab') {
                 flushActiveInput();
             } else if (e.key === 'Enter') {
                 flushActiveInput();
-                const meta = getElementMeta(e.target);
-                (window.__conduit_record__ || window.__testflow_record__)({
+                const meta = getElementMeta(t);
+                sendConduitEvent({
                     action: 'press',
                     meta: meta,
                     value: 'Enter',
@@ -333,25 +405,26 @@ RECORDER_INJECTED_SCRIPT = """
 
     document.addEventListener('click', (e) => {
         try {
-            if (!e || !e.target) return;
-            if (e.target.closest && (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__'))) return;
+            const t = getEventTarget(e);
+            if (!t) return;
+            if (t.closest && (t.closest('#__conduit_overlay__') || t.closest('#__conduit_context_menu__'))) return;
 
             flushActiveInput();
 
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-                lastTargetInput = e.target;
+            if (isInputLike(t)) {
+                lastTargetInput = t;
             }
 
-            const meta = getElementMeta(e.target);
+            const meta = getElementMeta(t);
 
             if (e.altKey) {
                 e.preventDefault();
                 e.stopPropagation();
-                showAssertionMenu(e.clientX, e.clientY, meta, e.target);
+                showAssertionMenu(e.clientX, e.clientY, meta, t);
                 return;
             }
 
-            (window.__conduit_record__ || window.__testflow_record__)({
+            sendConduitEvent({
                 action: 'click',
                 meta: meta,
                 url: window.location.href,
@@ -363,19 +436,22 @@ RECORDER_INJECTED_SCRIPT = """
     document.addEventListener('change', (e) => {
         try {
             if (isProgrammaticFill) return;
-            if (e.target && e.target.closest && (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__'))) return;
-            if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
-                lastTargetInput = e.target;
+            const t = getEventTarget(e);
+            if (!t) return;
+            if (t.closest && (t.closest('#__conduit_overlay__') || t.closest('#__conduit_context_menu__'))) return;
+            if (isInputLike(t)) {
+                lastTargetInput = t;
             }
-            lastActiveElement = e.target;
-            lastTypedValue = e.target && e.target.value !== undefined ? e.target.value : (e.target && e.target.innerText ? e.target.innerText : '');
+            lastActiveElement = t;
+            lastTypedValue = getElementValue(t);
             flushActiveInput();
         } catch (err) {}
     }, true);
 
     document.addEventListener('focusout', (e) => {
         try {
-            if (lastActiveElement === e.target) {
+            const t = getEventTarget(e);
+            if (lastActiveElement === t) {
                 flushActiveInput();
             }
         } catch (err) {}
@@ -417,7 +493,7 @@ RECORDER_INJECTED_SCRIPT = """
         (document.body || document.documentElement).appendChild(menu);
 
         document.getElementById('__tf_assert_visible').onclick = () => {
-            (window.__conduit_record__ || window.__testflow_record__)({
+            sendConduitEvent({
                 action: 'assert_visible',
                 meta: meta,
                 url: window.location.href,
@@ -429,7 +505,7 @@ RECORDER_INJECTED_SCRIPT = """
         document.getElementById('__tf_assert_text').onclick = () => {
             const textVal = prompt('Expected text content:', meta.text || '');
             if (textVal !== null) {
-                (window.__conduit_record__ || window.__testflow_record__)({
+                sendConduitEvent({
                     action: 'assert_text',
                     meta: meta,
                     value: textVal,
@@ -443,7 +519,7 @@ RECORDER_INJECTED_SCRIPT = """
         document.getElementById('__tf_assert_val').onclick = () => {
             const val = prompt('Expected element value:', el.value || '');
             if (val !== null) {
-                (window.__conduit_record__ || window.__testflow_record__)({
+                sendConduitEvent({
                     action: 'assert_value',
                     meta: meta,
                     value: val,
@@ -538,24 +614,28 @@ class BrowserRecorder:
                 }
                 self._record_step(nav_action)
 
+                def _attach_page(p: Page):
+                    def _on_frame_navigated(frame):
+                        try:
+                            if frame == p.main_frame:
+                                current_url = frame.url
+                                if current_url and not current_url.startswith(("about:", "chrome:", "edge:")):
+                                    with self._lock:
+                                        if self.recorded_actions:
+                                            last_act = self.recorded_actions[-1]
+                                            if last_act.get("action") == "navigate" and last_act.get("url") != current_url:
+                                                last_act["url"] = current_url
+                                                last_act["value"] = current_url
+                                                last_act["human_description"] = f"Navigate to {current_url}"
+                        except Exception:
+                            pass
+
+                    p.on("framenavigated", _on_frame_navigated)
+
+                self._context.on("page", lambda new_p: _attach_page(new_p))
+                _attach_page(self._page)
+
                 self._page.goto(initial_url)
-
-                def _on_frame_navigated(frame):
-                    try:
-                        if self._page and frame == self._page.main_frame:
-                            current_url = frame.url
-                            if current_url and not current_url.startswith(("about:", "chrome:", "edge:")):
-                                with self._lock:
-                                    if self.recorded_actions:
-                                        last_act = self.recorded_actions[-1]
-                                        if last_act.get("action") == "navigate" and last_act.get("url") != current_url:
-                                            last_act["url"] = current_url
-                                            last_act["value"] = current_url
-                                            last_act["human_description"] = f"Navigate to {current_url}"
-                    except Exception:
-                        pass
-
-                self._page.on("framenavigated", _on_frame_navigated)
 
                 while self._is_recording and self._context and self._context.pages:
                     try:
@@ -622,11 +702,12 @@ class BrowserRecorder:
                 if act_type == "fill" and self.recorded_actions:
                     last_action = self.recorded_actions[-1]
                     if last_action.get("action") == "click":
+                        last_tag = (last_action.get("meta", {}).get("tag") or "").lower()
                         last_css = last_action.get("meta", {}).get("css_selector")
                         curr_css = meta.get("css_selector")
                         last_sel = last_action.get("selector_info") or {}
                         curr_sel = selector_info or {}
-                        if (last_css and curr_css and last_css == curr_css) or (last_sel.get("code") and last_sel.get("code") == curr_sel.get("code")):
+                        if last_tag in ("input", "textarea") or (last_css and curr_css and last_css == curr_css) or (last_sel.get("code") and last_sel.get("code") == curr_sel.get("code")):
                             self.recorded_actions.pop()
 
                 if act_type == "fill" and self.recorded_actions:
@@ -637,9 +718,9 @@ class BrowserRecorder:
                         curr_css = meta.get("css_selector")
                         last_sel = last_action.get("selector_info") or {}
                         curr_sel = selector_info or {}
-                        if last_css and curr_css and last_css == curr_css:
+                        if last_css and curr_css and last_css == curr_css and last_css not in ("body", "element"):
                             same_element = True
-                        elif last_sel.get("code") and last_sel.get("code") == curr_sel.get("code"):
+                        elif last_sel.get("code") and last_sel.get("code") == curr_sel.get("code") and last_sel.get("code") != "self.page.locator('body')":
                             same_element = True
 
                     if same_element:

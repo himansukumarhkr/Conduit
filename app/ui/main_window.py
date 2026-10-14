@@ -630,7 +630,27 @@ class StepEditorDialog(QDialog):
             self.action_combo.addItem(label, act_key)
 
         desc = self.step_data.get("human_description", "")
+        code = self.step_data.get("code", "")
         cur_act = self.step_data.get("action", "click")
+        combined = f"{code} {desc}".lower()
+        if cur_act == "click":
+            if any(k in combined for k in ["fill", "type '", "into '", "column", ".fill", "enter ", "input "]):
+                cur_act = "fill"
+            elif "assert" in combined or "expect" in combined or "to_be_" in combined:
+                if "text" in combined or "contains" in combined or "toast" in combined:
+                    cur_act = "assert_text"
+                elif "value" in combined or "counter" in combined or "equals" in combined:
+                    cur_act = "assert_value"
+                else:
+                    cur_act = "assert_visible"
+            elif "goto" in combined or "navigate" in combined:
+                cur_act = "navigate"
+            elif "press" in combined:
+                cur_act = "press"
+            elif "wait" in combined:
+                cur_act = "wait"
+            elif "screenshot" in combined:
+                cur_act = "take_screenshot"
 
         for i, (_, k) in enumerate(self.actions_map):
             if k == cur_act:
@@ -3536,23 +3556,22 @@ class ConduitMainWindow(QMainWindow):
         add_env_btn.clicked.connect(self.quick_add_env)
         left_cluster.addWidget(add_env_btn)
 
-        del_env_btn = QPushButton("−")
-        del_env_btn.setFixedSize(24, 24)
+        del_env_btn = QPushButton("🗑️")
+        del_env_btn.setFixedSize(26, 26)
         del_env_btn.setCursor(Qt.PointingHandCursor)
         del_env_btn.setToolTip("Delete active Environment")
         del_env_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
-                border: 1px dashed #334155;
-                color: #94a3b8;
-                font-size: 13px;
-                font-weight: bold;
-                border-radius: 12px;
+                border: 1px solid #334155;
+                color: #f87171;
+                font-size: 11px;
+                border-radius: 6px;
             }
             QPushButton:hover {
-                color: #ef4444;
+                color: #ffffff;
                 border-color: #ef4444;
-                background-color: rgba(239, 68, 68, 0.12);
+                background-color: #ef4444;
             }
         """)
         del_env_btn.clicked.connect(self.quick_delete_env)
@@ -4165,7 +4184,10 @@ class ConduitMainWindow(QMainWindow):
         self.toggle_lbl.setCursor(Qt.PointingHandCursor)
         self.toggle_lbl.setToolTip("Click to toggle Python POM code view")
         self.toggle_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #94a3b8; margin-left: 6px;")
-        self.toggle_lbl.mousePressEvent = lambda e: self.code_toggle.setChecked(not self.code_toggle.isChecked())
+        self.toggle_lbl.mousePressEvent = lambda e: (
+            self.code_toggle.setChecked(not self.code_toggle.isChecked()),
+            self.on_code_toggle(self.code_toggle.isChecked())
+        )
         header_layout.addWidget(self.toggle_lbl)
 
         self.code_toggle = ToggleSwitch()
@@ -4202,7 +4224,7 @@ class ConduitMainWindow(QMainWindow):
                 color: #ffffff;
             }
         """)
-        self.btn_view_code.clicked.connect(lambda: self.code_toggle.setChecked(True))
+        self.btn_view_code.clicked.connect(lambda: (self.code_toggle.setChecked(True), self.on_code_toggle(True)))
         steps_hdr.addWidget(self.btn_view_code)
 
         self.btn_auto_heal = QPushButton("⚡ Auto-Heal")
@@ -4293,7 +4315,7 @@ class ConduitMainWindow(QMainWindow):
                 color: #ffffff;
             }
         """)
-        self.btn_view_steps.clicked.connect(lambda: self.code_toggle.setChecked(False))
+        self.btn_view_steps.clicked.connect(lambda: (self.code_toggle.setChecked(False), self.on_code_toggle(False)))
         code_hdr.addWidget(self.btn_view_steps)
 
         self.btn_claude_code = QPushButton("🤖 Claude Assistant")
@@ -5104,6 +5126,7 @@ class ConduitMainWindow(QMainWindow):
     def open_scenario_code(self, scenario_id: str):
         self.select_scenario(scenario_id)
         self.code_toggle.setChecked(True)
+        self.on_code_toggle(True)
 
     def duplicate_scenario(self, scenario_id: str):
         new_sc = self.catalog.duplicate_scenario(scenario_id)

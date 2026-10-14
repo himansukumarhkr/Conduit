@@ -286,36 +286,36 @@ class ASTNormalizer:
             "assert_visible", "assert_text", "assert_value", "assert_title", "assert_url", "api_request"
         ]
 
-        if raw_act in valid_acts and raw_act != "custom":
-            act = raw_act
-        else:
-            combined = f"{code} {desc}".lower()
-            if "fill" in combined or "type '" in combined or "into '" in combined:
+        combined = f"{code} {desc}".lower()
+        if raw_act == "click" or raw_act not in valid_acts or raw_act == "custom":
+            if "fill" in combined or "type '" in combined or "into '" in combined or "column" in combined or ".fill" in combined or "select " in combined:
                 act = "fill"
-            elif "goto" in combined or "navigate" in combined:
-                act = "navigate"
-            elif "press" in combined:
-                act = "press"
             elif "to_have_title" in combined or "page title" in combined:
                 act = "assert_title"
             elif "to_have_url" in combined or "page url" in combined:
                 act = "assert_url"
+            elif ("assert" in combined or "expect" in combined) and any(k in combined for k in ["counter", "equals", "value", "count"]):
+                act = "assert_value"
+            elif ("assert" in combined or "expect" in combined) and any(k in combined for k in ["text", "contains", "toast", "message"]):
+                act = "assert_text"
+            elif ("assert" in combined or "expect" in combined):
+                act = "assert_visible"
+            elif "goto" in combined or "navigate" in combined:
+                act = "navigate"
+            elif "press" in combined:
+                act = "press"
             elif "wait" in combined:
                 act = "wait"
             elif "screenshot" in combined:
                 act = "take_screenshot"
             elif "request" in combined or "api" in combined:
                 act = "api_request"
-            elif "visible" in combined:
-                act = "assert_visible"
-            elif "text" in combined and ("assert" in combined or "expect" in combined):
-                act = "assert_text"
-            elif "value" in combined and ("assert" in combined or "expect" in combined):
-                act = "assert_value"
             elif "click" in combined:
                 act = "click"
             else:
                 act = raw_act or "click"
+        else:
+            act = raw_act
 
         if val is None or str(val) == "":
             extracted_val = ""
