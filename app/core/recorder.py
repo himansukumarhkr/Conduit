@@ -23,7 +23,7 @@ RECORDER_INJECTED_SCRIPT = """
                 clearTimeout(debounceTimer);
                 debounceTimer = null;
             }
-            if (!lastActiveElement && document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+            if (!lastActiveElement && document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.isContentEditable || document.activeElement.getAttribute('role') === 'textbox')) {
                 lastActiveElement = document.activeElement;
                 lastTypedValue = document.activeElement.value !== undefined ? document.activeElement.value : (document.activeElement.innerText || '');
             }
@@ -154,7 +154,17 @@ RECORDER_INJECTED_SCRIPT = """
         if (target) {
             target.focus();
             isProgrammaticFill = true;
-            target.value = value;
+            try {
+                const proto = target.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+                const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                if (nativeSetter) {
+                    nativeSetter.call(target, value);
+                } else {
+                    target.value = value;
+                }
+            } catch (err) {
+                target.value = value;
+            }
             target.dispatchEvent(new Event('input', { bubbles: true }));
             target.dispatchEvent(new Event('change', { bubbles: true }));
             isProgrammaticFill = false;
@@ -349,38 +359,44 @@ RECORDER_INJECTED_SCRIPT = """
             });
         } catch (err) {}
     }, true);
-            url: window.location.href,
-            timestamp: Date.now()
-        });
-    }, true);
 
     document.addEventListener('change', (e) => {
-        if (isProgrammaticFill) return;
-        if (e.target.closest('#__conduit_overlay__')) return;
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-            lastTargetInput = e.target;
-        }
-        lastActiveElement = e.target;
-        lastTypedValue = e.target.value !== undefined ? e.target.value : (e.target.innerText || '');
-        flushActiveInput();
+        try {
+            if (isProgrammaticFill) return;
+            if (e.target && e.target.closest && (e.target.closest('#__conduit_overlay__') || e.target.closest('#__conduit_context_menu__'))) return;
+            if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                lastTargetInput = e.target;
+            }
+            lastActiveElement = e.target;
+            lastTypedValue = e.target && e.target.value !== undefined ? e.target.value : (e.target && e.target.innerText ? e.target.innerText : '');
+            flushActiveInput();
+        } catch (err) {}
     }, true);
 
     document.addEventListener('focusout', (e) => {
-        if (lastActiveElement === e.target) {
-            flushActiveInput();
-        }
+        try {
+            if (lastActiveElement === e.target) {
+                flushActiveInput();
+            }
+        } catch (err) {}
     }, true);
 
     document.addEventListener('submit', (e) => {
-        flushActiveInput();
+        try {
+            flushActiveInput();
+        } catch (err) {}
     }, true);
 
     window.addEventListener('beforeunload', () => {
-        flushActiveInput();
+        try {
+            flushActiveInput();
+        } catch (err) {}
     });
 
     window.addEventListener('pagehide', () => {
-        flushActiveInput();
+        try {
+            flushActiveInput();
+        } catch (err) {}
     });
 
     function showAssertionMenu(x, y, meta, el) {

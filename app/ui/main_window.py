@@ -3529,6 +3529,28 @@ class ConduitMainWindow(QMainWindow):
         add_env_btn.clicked.connect(self.quick_add_env)
         left_cluster.addWidget(add_env_btn)
 
+        del_env_btn = QPushButton("−")
+        del_env_btn.setFixedSize(24, 24)
+        del_env_btn.setCursor(Qt.PointingHandCursor)
+        del_env_btn.setToolTip("Delete active Environment")
+        del_env_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: 1px dashed #334155;
+                color: #94a3b8;
+                font-size: 13px;
+                font-weight: bold;
+                border-radius: 12px;
+            }
+            QPushButton:hover {
+                color: #ef4444;
+                border-color: #ef4444;
+                background-color: rgba(239, 68, 68, 0.12);
+            }
+        """)
+        del_env_btn.clicked.connect(self.quick_delete_env)
+        left_cluster.addWidget(del_env_btn)
+
         test_data_btn = QPushButton("📊 Test Data")
         test_data_btn.setFixedHeight(28)
         test_data_btn.setCursor(Qt.PointingHandCursor)
@@ -3760,6 +3782,8 @@ class ConduitMainWindow(QMainWindow):
     def _make_env_pill(self, env_name, active=False):
         btn = QPushButton(env_name)
         btn.setCursor(Qt.PointingHandCursor)
+        btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        btn.customContextMenuRequested.connect(lambda pos, en=env_name, b=btn: self.show_env_context_menu(en, b, pos))
         if active:
             btn.setStyleSheet("""
                 QPushButton {
@@ -3791,6 +3815,45 @@ class ConduitMainWindow(QMainWindow):
         btn.clicked.connect(lambda _, en=env_name: self.set_environment(en))
         return btn
 
+    def show_env_context_menu(self, env_name: str, button_widget, pos):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #0f172a;
+                border: 1px solid #334155;
+                border-radius: 8px;
+                padding: 6px;
+                color: #e2e8f0;
+            }
+            QMenu::item {
+                padding: 6px 14px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QMenu::item:selected {
+                background-color: #1e293b;
+                color: #38bdf8;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #1e293b;
+                margin: 4px 6px;
+            }
+        """)
+        act_switch = menu.addAction(f"Switch Context to '{env_name}'")
+        act_switch.triggered.connect(lambda: self.set_environment(env_name))
+
+        menu.addSeparator()
+
+        act_del = menu.addAction(f"🗑️ Delete Environment '{env_name}'")
+        act_del.triggered.connect(lambda: self.delete_specific_env(env_name))
+
+        act_add = menu.addAction("+ Add New Environment")
+        act_add.triggered.connect(self.quick_add_env)
+
+        global_pos = button_widget.mapToGlobal(pos)
+        menu.exec(global_pos)
+
     def set_environment(self, env_name):
         self.current_env = env_name
         self.test_data_mgr.set_active_environment(env_name)
@@ -3806,6 +3869,26 @@ class ConduitMainWindow(QMainWindow):
                 self.append_log("SUCCESS", f"Environment [{clean_name}] created and activated.")
             else:
                 self.append_log("WARNING", f"Environment [{clean_name}] already exists.")
+
+    def quick_delete_env(self):
+        self.delete_specific_env(self.current_env)
+
+    def delete_specific_env(self, env_name: str):
+        envs = self.test_data_mgr.get_environments()
+        if len(envs) <= 1:
+            QMessageBox.warning(self, "Conduit", "Cannot delete the only remaining environment.")
+            return
+        res = QMessageBox.question(
+            self,
+            "Delete Environment",
+            f"Are you sure you want to delete environment '{env_name}' and all its test data?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if res == QMessageBox.Yes:
+            if self.test_data_mgr.remove_environment(env_name):
+                self.current_env = self.test_data_mgr.get_active_environment()
+                self.render_env_pills()
+                self.append_log("SUCCESS", f"Environment [{env_name}] removed. Active context switched to [{self.current_env}].")
 
     def open_test_data_dialog(self):
         dlg = TestDataDialog(
@@ -4071,11 +4154,15 @@ class ConduitMainWindow(QMainWindow):
         self.btn_delete_flow.clicked.connect(self.delete_current_scenario)
         header_layout.addWidget(self.btn_delete_flow)
 
-        toggle_lbl = QLabel("Show Code")
-        toggle_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #94a3b8; margin-left: 6px;")
-        header_layout.addWidget(toggle_lbl)
+        self.toggle_lbl = QLabel("Show Code")
+        self.toggle_lbl.setCursor(Qt.PointingHandCursor)
+        self.toggle_lbl.setToolTip("Click to toggle Python POM code view")
+        self.toggle_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #94a3b8; margin-left: 6px;")
+        self.toggle_lbl.mousePressEvent = lambda e: self.code_toggle.setChecked(not self.code_toggle.isChecked())
+        header_layout.addWidget(self.toggle_lbl)
 
         self.code_toggle = ToggleSwitch()
+        self.code_toggle.setToolTip("Toggle Python POM code view")
         self.code_toggle.stateChanged.connect(self.on_code_toggle)
         header_layout.addWidget(self.code_toggle)
         layout.addLayout(header_layout)
@@ -4090,6 +4177,26 @@ class ConduitMainWindow(QMainWindow):
         self.steps_title_lbl = QLabel("Flow Steps: User Login Flow")
         self.steps_title_lbl.setStyleSheet("font-size: 12px; font-weight: bold; color: #cbd5e1;")
         steps_hdr.addWidget(self.steps_title_lbl, 1)
+
+        self.btn_view_code = QPushButton("💻 Show Code")
+        self.btn_view_code.setCursor(Qt.PointingHandCursor)
+        self.btn_view_code.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                border: 1px solid #38bdf8;
+                color: #38bdf8;
+                font-size: 11px;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover {
+                background-color: #0284c7;
+                color: #ffffff;
+            }
+        """)
+        self.btn_view_code.clicked.connect(lambda: self.code_toggle.setChecked(True))
+        steps_hdr.addWidget(self.btn_view_code)
 
         self.btn_auto_heal = QPushButton("⚡ Auto-Heal")
         self.btn_auto_heal.setCursor(Qt.PointingHandCursor)
@@ -4161,6 +4268,26 @@ class ConduitMainWindow(QMainWindow):
         code_hdr.addWidget(self.code_status_lbl)
 
         code_hdr.addStretch()
+
+        self.btn_view_steps = QPushButton("📋 Show Steps")
+        self.btn_view_steps.setCursor(Qt.PointingHandCursor)
+        self.btn_view_steps.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                border: 1px solid #38bdf8;
+                color: #38bdf8;
+                font-size: 11px;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover {
+                background-color: #0284c7;
+                color: #ffffff;
+            }
+        """)
+        self.btn_view_steps.clicked.connect(lambda: self.code_toggle.setChecked(False))
+        code_hdr.addWidget(self.btn_view_steps)
 
         self.btn_claude_code = QPushButton("🤖 Claude Assistant")
         self.btn_claude_code.setCursor(Qt.PointingHandCursor)
@@ -4755,6 +4882,13 @@ class ConduitMainWindow(QMainWindow):
         show = state == Qt.Checked.value or state is True or state == 2
         self.code_viewer_frame.setVisible(show)
         self.steps_box.setVisible(not show)
+        if hasattr(self, "toggle_lbl"):
+            if show:
+                self.toggle_lbl.setText("Hide Code")
+                self.toggle_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #38bdf8; margin-left: 6px;")
+            else:
+                self.toggle_lbl.setText("Show Code")
+                self.toggle_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #94a3b8; margin-left: 6px;")
 
     def copy_code(self):
         text = self.code_edit.toPlainText()
@@ -4938,7 +5072,7 @@ class ConduitMainWindow(QMainWindow):
         act_run = menu.addAction("▶ Run Test")
         act_run.triggered.connect(lambda: self.run_single_test(scenario_id))
 
-        act_code = menu.addAction("📝 Edit Code")
+        act_code = menu.addAction("💻 Show Code / Edit")
         act_code.triggered.connect(lambda: self.open_scenario_code(scenario_id))
 
         menu.addSeparator()

@@ -6,7 +6,7 @@ from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication
 
 from app.core.runner import TestRunner
-from app.core.recorder import BrowserRecorder
+from app.core.recorder import BrowserRecorder, RECORDER_INJECTED_SCRIPT
 from app.core.ast_normalizer import ASTNormalizer
 from app.ui.main_window import CodeEditor, RecordDialog, NewScriptDialog
 
@@ -204,4 +204,43 @@ def test_record_dialog_url_normalization():
     dlg2.url_edit.setText("www.facebook.com")
     name2, url2, tags2, mode = dlg2.get_data()
     assert url2 == "https://www.facebook.com"
+
+
+def test_recorder_injected_script_validity_and_events():
+    from playwright.sync_api import sync_playwright
+    captured = []
+    with sync_playwright() as p:
+        channels_to_try = ["msedge", "chrome"]
+        browser = None
+        for ch in channels_to_try:
+            try:
+                browser = p.chromium.launch(channel=ch, headless=True)
+                break
+            except Exception:
+                pass
+        if not browser:
+            try:
+                browser = p.chromium.launch(headless=True)
+            except Exception:
+                return
+
+        ctx = browser.new_context()
+        ctx.expose_binding("__conduit_record__", lambda src, ev: captured.append(ev))
+        ctx.expose_binding("__testflow_record__", lambda src, ev: captured.append(ev))
+        page_errors = []
+        ctx.add_init_script(RECORDER_INJECTED_SCRIPT)
+        page = ctx.new_page()
+        page.on("pageerror", lambda err: page_errors.append(str(err)))
+        page.goto("https://demo.playwright.dev/todomvc/")
+        init_state = page.evaluate("() => window.__CONDUIT_RECORDING_INITIALIZED__")
+        assert init_state is True
+        assert len(page_errors) == 0
+
+        page.type(".new-todo", "Buy milk")
+        page.press(".new-todo", "Enter")
+        page.wait_for_timeout(300)
+
+        actions = [a.get("action") for a in captured]
+        assert "fill" in actions or "press" in actions
+        browser.close()
 

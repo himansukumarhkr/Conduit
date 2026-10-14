@@ -31,8 +31,40 @@ def test_main_window_components():
         assert not win.code_viewer_frame.isVisible()
         assert win.steps_box.isVisible()
 
+        from PySide6.QtGui import QMouseEvent
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QMessageBox
+
+        ev_click = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPoint(5, 5), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+        win.toggle_lbl.mousePressEvent(ev_click)
+        assert win.code_toggle.isChecked()
+        assert win.code_viewer_frame.isVisible()
+        assert win.toggle_lbl.text() == "Hide Code"
+
+        win.btn_view_steps.click()
+        assert not win.code_toggle.isChecked()
+        assert not win.code_viewer_frame.isVisible()
+        assert win.steps_box.isVisible()
+        assert win.toggle_lbl.text() == "Show Code"
+
+        win.btn_view_code.click()
+        assert win.code_toggle.isChecked()
+        assert win.code_viewer_frame.isVisible()
+
+        win.btn_view_steps.click()
+        assert not win.code_viewer_frame.isVisible()
+
         win.set_environment("Staging")
         assert win.current_env == "Staging"
+
+        assert win.test_data_mgr.add_environment("Dev-Test")
+        win.render_env_pills()
+        assert "Dev-Test" in win.test_data_mgr.get_environments()
+        orig_q = QMessageBox.question
+        QMessageBox.question = lambda *args, **kwargs: QMessageBox.Yes
+        win.delete_specific_env("Dev-Test")
+        assert "Dev-Test" not in win.test_data_mgr.get_environments()
+        QMessageBox.question = orig_q
 
         win.set_browser("chrome")
         assert win.selected_browser == "chrome"
