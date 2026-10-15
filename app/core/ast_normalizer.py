@@ -97,7 +97,22 @@ class ASTNormalizer:
             page_data = pages_dict[current_page_name]
             sel = norm_action.get("selector_info") or {}
             var_name = sel.get("var_name", "element")
-            locator_expr = sel.get("locator_expr", "self.page.locator('body')")
+            locator_expr = sel.get("locator_expr", "")
+            if not locator_expr or locator_expr == "self.page.locator('body')":
+                display_q = sel.get("display") or var_name
+                strat = sel.get("strategy", "css")
+                loc_cand = SelectorEngine.create_custom_selector(strat, display_q, var_name)
+                locator_expr = loc_cand.get("locator_expr", "self.page.locator('body')")
+            elif "role='role=" in locator_expr or 'get_by_role("role=' in locator_expr or "get_by_role('role=" in locator_expr or ("role='" in locator_expr and "name=" in locator_expr and 'get_by_role("' in locator_expr and ', name=' not in locator_expr):
+                m_fix = re.search(r"role=['\"]([a-zA-Z0-9_-]+)['\"](?:,\s*name=['\"]([^'\"]*)['\"])?", locator_expr)
+                if m_fix:
+                    r_type = m_fix.group(1)
+                    r_name = m_fix.group(2)
+                    if r_name:
+                        locator_expr = f'self.page.get_by_role("{r_type}", name="{r_name}")'
+                    else:
+                        locator_expr = f'self.page.get_by_role("{r_type}")'
+
             val = norm_action.get("value", "")
 
             non_locator_actions = ["navigate", "wait", "take_screenshot", "assert_title", "assert_url", "api_request"]
@@ -203,6 +218,10 @@ class ASTNormalizer:
         fallback = action.get("fallback_value") or action.get("default_value") or ""
         if not fallback and not val_str.startswith("{{") and not val_str.startswith("$") and val_str != var_key:
             fallback = val_str
+        if not fallback:
+            m_fb = re.search(r"with '([^']*)'", str(action.get("human_description") or ""))
+            if m_fb:
+                fallback = m_fb.group(1)
         return (var_key, fallback)
 
     def _synthesize_step_and_method(
@@ -358,10 +377,42 @@ class ASTNormalizer:
                 break
 
         if has_vars and fn_def_idx != -1:
-            vars_stmt = '    vars = test_data.get("variables", {}) if isinstance(test_data, dict) else {}'
+            vars_stmts = [
+                '    vars = test_data.get("variables", {}) if isinstance(test_data, dict) else {}',
+                '    if not isinstance(vars, SmartVarDict):',
+                '        vars = SmartVarDict(vars)'
+            ]
             has_vars_stmt = any("vars = test_data.get(" in l for l in lines)
             if not has_vars_stmt:
-                lines.insert(fn_def_idx + 1, vars_stmt)
+                for offset, vs in enumerate(vars_stmts):
+                    lines.insert(fn_def_idx + 1 + offset, vs)
+            elif not any("isinstance(vars, SmartVarDict)" in l for l in lines):
+                for i_l, l in enumerate(lines):
+                    if "vars = test_data.get(" in l:
+                        lines.insert(i_l + 1, '    if not isinstance(vars, SmartVarDict):\n        vars = SmartVarDict(vars)')
+                        break
+
+            if not any("class SmartVarDict" in l for l in lines):
+                smart_var_lines = [
+                    "class SmartVarDict(dict):",
+                    "    def get(self, key, default=''):",
+                    "        val = super().get(key)",
+                    "        if val is not None and str(val) != '':",
+                    "            return val",
+                    "        kl = str(key).lower()",
+                    "        for k, v in self.items():",
+                    "            if str(k).lower() == kl and v is not None and str(v) != '':",
+                    "                return v",
+                    "        import os",
+                    "        for env_k in (f'CONDUIT_VAR_{key}', key, str(key).upper(), str(key).lower()):",
+                    "            if env_k in os.environ and os.environ[env_k] != '':",
+                    "                return os.environ[env_k]",
+                    "        return default",
+                    ""
+                ]
+                for offset, fl in enumerate(smart_var_lines):
+                    lines.insert(offset, fl)
+                fn_def_idx += len(smart_var_lines)
 
             if not any("def test_data" in l for l in lines):
                 insert_idx = fn_def_idx
@@ -370,14 +421,33 @@ class ASTNormalizer:
                 fixture_lines = [
                     "@pytest.fixture",
                     "def test_data():",
-                    "    try:",
-                    "        from app.core.test_data_manager import TestDataManager",
-                    "        import os",
-                    "        workspace = os.environ.get('CONDUIT_WORKSPACE', os.getcwd())",
-                    "        env = os.environ.get('CONDUIT_ENV', 'QA')",
-                    "        return TestDataManager(workspace).get_environment_data(env)",
-                    "    except Exception:",
-                    "        return {}",
+                    "    import os, json",
+                    "    workspace = os.environ.get('CONDUIT_WORKSPACE', os.getcwd())",
+                    "    env = os.environ.get('CONDUIT_ENV', 'QA')",
+                    "    candidates = [",
+                    "        os.path.join(workspace, 'test_data', f'{env}.json'),",
+                    "        os.path.join(workspace, f'{env}.json'),",
+                    "        os.path.join(os.getcwd(), 'test_data', f'{env}.json')",
+                    "    ]",
+                    "    raw_data = None",
+                    "    for p in candidates:",
+                    "        if os.path.exists(p):",
+                    "            try:",
+                    "                with open(p, 'r', encoding='utf-8') as f:",
+                    "                    raw_data = json.load(f)",
+                    "                    break",
+                    "            except Exception:",
+                    "                pass",
+                    "    if not raw_data:",
+                    "        try:",
+                    "            from app.core.test_data_manager import TestDataManager",
+                    "            raw_data = TestDataManager(workspace).get_environment_data(env)",
+                    "        except Exception:",
+                    "            raw_data = {'environment': env, 'variables': {}}",
+                    "    vars_dict = raw_data.get('variables', {}) if isinstance(raw_data, dict) else {}",
+                    "    if isinstance(raw_data, dict):",
+                    "        raw_data['variables'] = SmartVarDict(vars_dict)",
+                    "    return raw_data",
                     ""
                 ]
                 for offset, fl in enumerate(fixture_lines):
@@ -591,6 +661,24 @@ class ASTNormalizer:
                 sel = SelectorEngine.create_custom_selector("css", display_val or elem_var_name, elem_var_name)
             else:
                 sel = sel if isinstance(sel, dict) else {}
+
+        if isinstance(sel, dict):
+            loc_expr = sel.get("locator_expr", "")
+            if "role='role=" in loc_expr or 'get_by_role("role=' in loc_expr or "get_by_role('role=" in loc_expr or ("role='" in loc_expr and "name=" in loc_expr and 'get_by_role("' in loc_expr and ', name=' not in loc_expr):
+                m_fix = re.search(r"role=['\"]([a-zA-Z0-9_-]+)['\"](?:,\s*name=['\"]([^'\"]*)['\"])?", loc_expr)
+                if m_fix:
+                    r_type = m_fix.group(1)
+                    r_name = m_fix.group(2)
+                    if r_name:
+                        sel["strategy"] = "role"
+                        sel["locator_expr"] = f'self.page.get_by_role("{r_type}", name="{r_name}")'
+                        sel["code"] = f'page.get_by_role("{r_type}", name="{r_name}")'
+                        sel["display"] = f"role='{r_type}', name='{r_name}'"
+                    else:
+                        sel["strategy"] = "role"
+                        sel["locator_expr"] = f'self.page.get_by_role("{r_type}")'
+                        sel["code"] = f'page.get_by_role("{r_type}")'
+                        sel["display"] = f"role='{r_type}'"
 
         data["action"] = act
         data["value"] = val

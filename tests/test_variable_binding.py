@@ -130,7 +130,7 @@ def test_step_editor_dialog_on_save_updates_step_code(qapp):
     updated = dlg.get_step_data()
     assert updated["value"] == "{{username}}"
     assert updated["variable_name"] == "username"
-    assert updated["code"] == 'main_page.fill_email_address_or_mobile_number(vars.get("username", ""))'
+    assert updated["code"] == 'main_page.fill_email_address_or_mobile_number(vars.get("username", "himansukumar"))'
     assert updated["page_name"] == "MainPage"
 
 def test_patch_scenario_code_with_steps_updates_literal_and_fixture():

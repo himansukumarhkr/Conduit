@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import pytest
 from app.core.evidence_manager import EvidenceCollector
@@ -6,13 +7,50 @@ from app.core.evidence_manager import EvidenceCollector
 def pytest_configure(config):
     config.addinivalue_line("filterwarnings", "ignore::pytest.PytestUnknownMarkWarning")
 
+class SmartVarDict(dict):
+    def get(self, key, default=""):
+        val = super().get(key)
+        if val is not None and str(val) != "":
+            return val
+        kl = str(key).lower()
+        for k, v in self.items():
+            if str(k).lower() == kl and v is not None and str(v) != "":
+                return v
+        import os
+        for env_k in (f"CONDUIT_VAR_{key}", key, str(key).upper(), str(key).lower()):
+            if env_k in os.environ and os.environ[env_k] != "":
+                return os.environ[env_k]
+        return default
+
 @pytest.fixture
 def test_data():
-    from app.core.test_data_manager import TestDataManager
     workspace = os.environ.get("CONDUIT_WORKSPACE", os.getcwd())
     env = os.environ.get("CONDUIT_ENV", "QA")
-    mgr = TestDataManager(workspace)
-    return mgr.get_environment_data(env)
+    candidates = [
+        os.path.join(workspace, "test_data", f"{env}.json"),
+        os.path.join(workspace, f"{env}.json"),
+        os.path.join(os.getcwd(), "test_data", f"{env}.json")
+    ]
+    raw_data = None
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    raw_data = json.load(f)
+                    break
+            except Exception:
+                pass
+    if not raw_data:
+        try:
+            from app.core.test_data_manager import TestDataManager
+            raw_data = TestDataManager(workspace).get_environment_data(env)
+        except Exception:
+            raw_data = {"environment": env, "variables": {}}
+
+    vars_dict = raw_data.get("variables", {}) if isinstance(raw_data, dict) else {}
+    if isinstance(raw_data, dict):
+        raw_data["variables"] = SmartVarDict(vars_dict)
+    return raw_data
 
 @pytest.fixture(autouse=True)
 def conduit_step_evidence(request):

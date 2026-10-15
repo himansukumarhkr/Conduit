@@ -886,8 +886,20 @@ class StepEditorDialog(QDialog):
         elif not var_name:
             var_name = "element"
 
-        sel_info = SelectorEngine.create_custom_selector(strat, raw_sel or var_name, var_name)
+        cur_sel = self.step_data.get("selector_info") or {}
+        if cur_sel and cur_sel.get("locator_expr") and (not raw_sel or raw_sel == cur_sel.get("display") or raw_sel == cur_sel.get("var_name")):
+            sel_info = dict(cur_sel)
+            if var_name:
+                sel_info["var_name"] = var_name
+        else:
+            sel_info = SelectorEngine.create_custom_selector(strat, raw_sel or var_name, var_name)
+
         human_desc = self.desc_edit.text().strip()
+
+        fallback_val = self.step_data.get("fallback_value") or ""
+        old_val = str(self.step_data.get("value") or "")
+        if not fallback_val and old_val and not old_val.startswith("{{") and not old_val.startswith("$"):
+            fallback_val = old_val
 
         env_var = None
         if val.startswith("{{") and val.endswith("}}"):
@@ -902,6 +914,7 @@ class StepEditorDialog(QDialog):
         if env_var:
             val = f"{{{{{env_var}}}}}"
             self.step_data["variable_name"] = env_var
+            self.step_data["fallback_value"] = fallback_val
         else:
             self.step_data.pop("variable_name", None)
 
@@ -922,7 +935,7 @@ class StepEditorDialog(QDialog):
 
         if act_key == "navigate":
             if env_var:
-                step_code = f'page.goto(vars.get("{env_var}", "{val}"))'
+                step_code = f'page.goto(vars.get("{env_var}", "{fallback_val or val}"))'
             else:
                 step_code = f'page.goto("{val}")'
         elif act_key == "wait":
@@ -932,41 +945,41 @@ class StepEditorDialog(QDialog):
             step_code = f'page.screenshot(path="{val or "screenshot.png"}")'
         elif act_key == "assert_title":
             if env_var:
-                step_code = f'expect(page).to_have_title(vars.get("{env_var}", "{val}"))'
+                step_code = f'expect(page).to_have_title(vars.get("{env_var}", "{fallback_val or val}"))'
             else:
                 step_code = f'expect(page).to_have_title("{val}")'
         elif act_key == "assert_url":
             if env_var:
-                step_code = f'expect(page).to_have_url(vars.get("{env_var}", "{val}"))'
+                step_code = f'expect(page).to_have_url(vars.get("{env_var}", "{fallback_val or val}"))'
             else:
                 step_code = f'expect(page).to_have_url("{val}")'
         elif act_key == "api_request":
             if env_var:
-                step_code = f'page.request.get(vars.get("{env_var}", "{val}"))'
+                step_code = f'page.request.get(vars.get("{env_var}", "{fallback_val or val}"))'
             else:
                 step_code = f'page.request.get("{val}")'
         elif act_key == "click":
             step_code = f'{page_var}.click_{var_name}()'
         elif act_key == "fill":
             if env_var:
-                step_code = f'{page_var}.fill_{var_name}(vars.get("{env_var}", ""))'
+                step_code = f'{page_var}.fill_{var_name}(vars.get("{env_var}", "{fallback_val}"))'
             else:
                 step_code = f'{page_var}.fill_{var_name}("{val}")'
         elif act_key == "press":
             if env_var:
-                step_code = f'{page_var}.press_{var_name}(vars.get("{env_var}", ""))'
+                step_code = f'{page_var}.press_{var_name}(vars.get("{env_var}", "{fallback_val or "Enter"}"))'
             else:
                 step_code = f'{page_var}.press_{var_name}("{val or "Enter"}")'
         elif act_key == "assert_visible":
             step_code = f'{page_var}.assert_{var_name}_visible()'
         elif act_key == "assert_text":
             if env_var:
-                step_code = f'{page_var}.assert_{var_name}_contains_text(vars.get("{env_var}", ""))'
+                step_code = f'{page_var}.assert_{var_name}_contains_text(vars.get("{env_var}", "{fallback_val}"))'
             else:
                 step_code = f'{page_var}.assert_{var_name}_contains_text("{val}")'
         elif act_key == "assert_value":
             if env_var:
-                step_code = f'{page_var}.assert_{var_name}_has_value(vars.get("{env_var}", ""))'
+                step_code = f'{page_var}.assert_{var_name}_has_value(vars.get("{env_var}", "{fallback_val}"))'
             else:
                 step_code = f'{page_var}.assert_{var_name}_has_value("{val}")'
         else:

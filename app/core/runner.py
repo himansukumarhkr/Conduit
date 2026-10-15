@@ -82,6 +82,17 @@ class TestRunner:
             if os.environ.get("CONDUIT_HOLD_BROWSER"):
                 env_vars["CONDUIT_HOLD_BROWSER"] = os.environ.get("CONDUIT_HOLD_BROWSER")
 
+        try:
+            from app.core.test_data_manager import TestDataManager
+            tdm = TestDataManager(self.workspace_dir)
+            var_data = tdm.get_variables(env)
+            for vk, vv in var_data.items():
+                env_vars[f"CONDUIT_VAR_{vk}"] = str(vv)
+                if vk not in env_vars:
+                    env_vars[vk] = str(vv)
+        except Exception:
+            pass
+
         sc_start = time.time()
         sc_passed = False
         sc_ev_dir = ""

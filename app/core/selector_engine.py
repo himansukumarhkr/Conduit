@@ -146,32 +146,36 @@ class SelectorEngine:
         if not var_name:
             var_name = cls.clean_identifier(s)
 
-        if strat == "testid":
+        if strat == "xpath" or s.startswith("//") or s.startswith("xpath="):
+            clean_xp = s[6:] if s.startswith("xpath=") else s
             return {
-                "strategy": "testid",
-                "code": f'page.locator("[data-testid=\'{s}\']")',
-                "locator_expr": f'self.page.locator("[data-testid=\'{s}\']")',
+                "strategy": "xpath",
+                "code": f'page.locator({repr("xpath=" + clean_xp)})',
+                "locator_expr": f'self.page.locator({repr("xpath=" + clean_xp)})',
                 "var_name": var_name,
-                "display": f"data-testid='{s}'"
+                "display": f"xpath={clean_xp}"
             }
-        elif strat == "text":
-            return {
-                "strategy": "text",
-                "code": f'page.get_by_text({repr(s)}, exact=True)',
-                "locator_expr": f'self.page.get_by_text({repr(s)}, exact=True)',
-                "var_name": var_name,
-                "display": f"text='{s}'"
-            }
-        elif strat == "id":
-            clean_id = s.lstrip("#")
-            return {
-                "strategy": "id",
-                "code": f'page.locator("#{clean_id}")',
-                "locator_expr": f'self.page.locator("#{clean_id}")',
-                "var_name": var_name,
-                "display": f"#{clean_id}"
-            }
-        elif strat == "role":
+        elif strat == "role" or s.startswith("role=") or s.startswith("role='") or s.startswith('role="'):
+            role_m = re.match(r"^(?:role=)?['\"]?([a-zA-Z0-9_-]+)['\"]?(?:,\s*name=['\"]([^'\"]*)['\"])?", s)
+            if role_m:
+                role_type = role_m.group(1)
+                name_attr = role_m.group(2)
+                if name_attr:
+                    return {
+                        "strategy": "role",
+                        "code": f'page.get_by_role("{role_type}", name="{name_attr}")',
+                        "locator_expr": f'self.page.get_by_role("{role_type}", name="{name_attr}")',
+                        "var_name": var_name,
+                        "display": f"role='{role_type}', name='{name_attr}'"
+                    }
+                else:
+                    return {
+                        "strategy": "role",
+                        "code": f'page.get_by_role("{role_type}")',
+                        "locator_expr": f'self.page.get_by_role("{role_type}")',
+                        "var_name": var_name,
+                        "display": f"role='{role_type}'"
+                    }
             return {
                 "strategy": "role",
                 "code": f'page.get_by_role({repr(s)})',
@@ -179,13 +183,65 @@ class SelectorEngine:
                 "var_name": var_name,
                 "display": f"role='{s}'"
             }
-        elif strat == "xpath":
+        elif strat == "testid" or s.startswith("data-testid="):
+            clean_id = s
+            tid_m = re.match(r"^data-testid=['\"](.*)['\"]$", s)
+            if tid_m:
+                clean_id = tid_m.group(1)
             return {
-                "strategy": "xpath",
-                "code": f'page.locator({repr("xpath=" + s)})',
-                "locator_expr": f'self.page.locator({repr("xpath=" + s)})',
+                "strategy": "testid",
+                "code": f'page.locator("[data-testid=\'{clean_id}\']")',
+                "locator_expr": f'self.page.locator("[data-testid=\'{clean_id}\']")',
                 "var_name": var_name,
-                "display": f"xpath={s}"
+                "display": f"data-testid='{clean_id}'"
+            }
+        elif strat == "text" or s.startswith("text=") or "text='" in s or 'text="' in s:
+            clean_text = s
+            tm = re.match(r"^text=['\"](.*)['\"]$", s)
+            if tm:
+                clean_text = tm.group(1)
+            return {
+                "strategy": "text",
+                "code": f'page.get_by_text({repr(clean_text)}, exact=True)',
+                "locator_expr": f'self.page.get_by_text({repr(clean_text)}, exact=True)',
+                "var_name": var_name,
+                "display": f"text='{clean_text}'"
+            }
+        elif strat == "id" or s.startswith("id="):
+            clean_id = s.lstrip("#")
+            id_m = re.match(r"^id=['\"](.*)['\"]$", clean_id)
+            if id_m:
+                clean_id = id_m.group(1)
+            return {
+                "strategy": "id",
+                "code": f'page.locator("#{clean_id}")',
+                "locator_expr": f'self.page.locator("#{clean_id}")',
+                "var_name": var_name,
+                "display": f"#{clean_id}"
+            }
+        elif strat == "label" or s.startswith("label=") or "label='" in s or 'label="' in s:
+            clean_lbl = s
+            lbl_m = re.match(r"^label=['\"](.*)['\"]$", s)
+            if lbl_m:
+                clean_lbl = lbl_m.group(1)
+            return {
+                "strategy": "label",
+                "code": f'page.get_by_label({repr(clean_lbl)})',
+                "locator_expr": f'self.page.get_by_label({repr(clean_lbl)})',
+                "var_name": var_name,
+                "display": f"label='{clean_lbl}'"
+            }
+        elif strat == "placeholder" or s.startswith("placeholder=") or "placeholder='" in s or 'placeholder="' in s:
+            clean_ph = s
+            ph_m = re.match(r"^placeholder=['\"](.*)['\"]$", s)
+            if ph_m:
+                clean_ph = ph_m.group(1)
+            return {
+                "strategy": "placeholder",
+                "code": f'page.get_by_placeholder({repr(clean_ph)})',
+                "locator_expr": f'self.page.get_by_placeholder({repr(clean_ph)})',
+                "var_name": var_name,
+                "display": f"placeholder='{clean_ph}'"
             }
         else:
             return {

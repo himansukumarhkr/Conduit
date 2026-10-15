@@ -27,12 +27,58 @@ class CatalogManager:
                     f.write('pass\n')
         conftest_path = os.path.join(self.workspace_dir, "conftest.py")
         conftest_code = """import os
+import json
 import time
 import pytest
 from app.core.evidence_manager import EvidenceCollector
 
 def pytest_configure(config):
     config.addinivalue_line("filterwarnings", "ignore::pytest.PytestUnknownMarkWarning")
+
+class SmartVarDict(dict):
+    def get(self, key, default=""):
+        val = super().get(key)
+        if val is not None and str(val) != "":
+            return val
+        kl = str(key).lower()
+        for k, v in self.items():
+            if str(k).lower() == kl and v is not None and str(v) != "":
+                return v
+        import os
+        for env_k in (f"CONDUIT_VAR_{key}", key, str(key).upper(), str(key).lower()):
+            if env_k in os.environ and os.environ[env_k] != "":
+                return os.environ[env_k]
+        return default
+
+@pytest.fixture
+def test_data():
+    workspace = os.environ.get("CONDUIT_WORKSPACE", os.getcwd())
+    env = os.environ.get("CONDUIT_ENV", "QA")
+    candidates = [
+        os.path.join(workspace, "test_data", f"{env}.json"),
+        os.path.join(workspace, f"{env}.json"),
+        os.path.join(os.getcwd(), "test_data", f"{env}.json")
+    ]
+    raw_data = None
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    raw_data = json.load(f)
+                    break
+            except Exception:
+                pass
+    if not raw_data:
+        try:
+            from app.core.test_data_manager import TestDataManager
+            raw_data = TestDataManager(workspace).get_environment_data(env)
+        except Exception:
+            raw_data = {"environment": env, "variables": {}}
+
+    vars_dict = raw_data.get("variables", {}) if isinstance(raw_data, dict) else {}
+    if isinstance(raw_data, dict):
+        raw_data["variables"] = SmartVarDict(vars_dict)
+    return raw_data
 
 @pytest.fixture(autouse=True)
 def conduit_step_evidence(request):
@@ -108,21 +154,13 @@ def browser_context_args(browser_context_args):
         context_args["viewport"] = {"width": 1024, "height": 1366}
         context_args["is_mobile"] = True
     return context_args
-
-@pytest.fixture
-def test_data():
-    from app.core.test_data_manager import TestDataManager
-    workspace = os.environ.get("CONDUIT_WORKSPACE", os.getcwd())
-    env = os.environ.get("CONDUIT_ENV", "QA")
-    mgr = TestDataManager(workspace)
-    return mgr.get_environment_data(env)
 """
         should_write = not os.path.exists(conftest_path)
         if not should_write:
             try:
                 with open(conftest_path, "r", encoding="utf-8") as f:
                     c = f.read()
-                if "def test_data" not in c or "CONDUIT_HOLD_BROWSER" not in c or "rep_setup" not in c:
+                if "SmartVarDict" not in c or "def test_data" not in c or "CONDUIT_HOLD_BROWSER" not in c or "rep_setup" not in c:
                     should_write = True
             except Exception:
                 should_write = True
@@ -152,12 +190,43 @@ def test_data():
                     data = json.load(f)
                     self.scenarios = data.get("scenarios", [])
                     self._normalize_scenarios()
+                    healed_any = False
                     for sc in self.scenarios:
+                        for page in sc.get("pages", []):
+                            p_code = page.get("code", "")
+                            if "role='role=" in p_code or 'get_by_role("role=' in p_code or "get_by_role('role=" in p_code:
+                                page["code"] = re.sub(
+                                    r'get_by_role\([\'"]role=[\'"]([a-zA-Z0-9_-]+)[\'"],\s*name=[\'"]([^\'"]*)[\'"]\)',
+                                    r'get_by_role("\1", name="\2")',
+                                    p_code
+                                )
+                                healed_any = True
+                                self._write_scenario_files(sc)
                         for page in sc.get("pages", []):
                             p_file = page.get("file_name")
                             if p_file and not os.path.exists(os.path.join(self.pages_dir, p_file)):
                                 self._write_scenario_files(sc)
                                 break
+                    if healed_any:
+                        self.save_catalog()
+
+                    if os.path.exists(self.pages_dir):
+                        for pf in os.listdir(self.pages_dir):
+                            if pf.endswith(".py"):
+                                p_path = os.path.join(self.pages_dir, pf)
+                                try:
+                                    with open(p_path, "r", encoding="utf-8") as f:
+                                        p_txt = f.read()
+                                    if "role='role=" in p_txt or 'get_by_role("role=' in p_txt or "get_by_role('role=" in p_txt:
+                                        cleaned = re.sub(
+                                            r'get_by_role\([\'"]role=[\'"]([a-zA-Z0-9_-]+)[\'"],\s*name=[\'"]([^\'"]*)[\'"]\)',
+                                            r'get_by_role("\1", name="\2")',
+                                            p_txt
+                                        )
+                                        with open(p_path, "w", encoding="utf-8") as f:
+                                            f.write(cleaned)
+                                except Exception:
+                                    pass
                     return
             except Exception as e:
                 print(f"[Catalog Load Error]: {e}")
