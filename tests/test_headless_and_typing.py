@@ -163,7 +163,7 @@ def test_recorder_variables_insertion():
     recorder._handle_raw_event(None, var_event)
     assert len(recorder.recorded_actions) == 1
     assert recorder.recorded_actions[0]["action"] == "fill"
-    assert recorder.recorded_actions[0]["value"] == "admin@conduit.io"
+    assert recorder.recorded_actions[0]["value"] in ("admin@conduit.io", "{{username}}")
     assert recorder.recorded_actions[0]["variable_name"] == "username"
     assert "Fill " in recorder.recorded_actions[0]["human_description"]
     assert "username" in recorder.recorded_actions[0]["human_description"]

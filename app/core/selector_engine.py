@@ -130,8 +130,8 @@ class SelectorEngine:
         candidates.append({
             "rank": 20,
             "strategy": "css",
-            "code": f'page.locator("{css_selector}")',
-            "locator_expr": f'self.page.locator("{css_selector}")',
+            "code": f'page.locator({repr(css_selector)})',
+            "locator_expr": f'self.page.locator({repr(css_selector)})',
             "var_name": var_name,
             "display": css_selector
         })
@@ -157,8 +157,8 @@ class SelectorEngine:
         elif strat == "text":
             return {
                 "strategy": "text",
-                "code": f'page.get_by_text("{s}", exact=True)',
-                "locator_expr": f'self.page.get_by_text("{s}", exact=True)',
+                "code": f'page.get_by_text({repr(s)}, exact=True)',
+                "locator_expr": f'self.page.get_by_text({repr(s)}, exact=True)',
                 "var_name": var_name,
                 "display": f"text='{s}'"
             }
@@ -174,24 +174,24 @@ class SelectorEngine:
         elif strat == "role":
             return {
                 "strategy": "role",
-                "code": f'page.get_by_role("{s}")',
-                "locator_expr": f'self.page.get_by_role("{s}")',
+                "code": f'page.get_by_role({repr(s)})',
+                "locator_expr": f'self.page.get_by_role({repr(s)})',
                 "var_name": var_name,
                 "display": f"role='{s}'"
             }
         elif strat == "xpath":
             return {
                 "strategy": "xpath",
-                "code": f'page.locator("xpath={s}")',
-                "locator_expr": f'self.page.locator("xpath={s}")',
+                "code": f'page.locator({repr("xpath=" + s)})',
+                "locator_expr": f'self.page.locator({repr("xpath=" + s)})',
                 "var_name": var_name,
                 "display": f"xpath={s}"
             }
         else:
             return {
                 "strategy": "css",
-                "code": f'page.locator("{s}")',
-                "locator_expr": f'self.page.locator("{s}")',
+                "code": f'page.locator({repr(s)})',
+                "locator_expr": f'self.page.locator({repr(s)})',
                 "var_name": var_name,
                 "display": s
             }

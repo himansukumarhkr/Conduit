@@ -30,15 +30,19 @@ class ASTNormalizer:
             return default
         try:
             parsed = urlparse(url)
+            netloc = parsed.netloc.lower()
+            if netloc.startswith("www."):
+                netloc = netloc[4:]
+            parts = [p for p in netloc.split(".") if p and p not in ("com", "org", "net", "io", "dev", "co", "in", "app", "gov", "edu")]
+            domain_part = parts[0].capitalize() if parts else ""
             path = parsed.path.strip("/")
             if not path or path == "":
-                host = parsed.netloc.split(".")[0].capitalize()
-                return f"{host}HomePage" if host else default
+                return f"{domain_part}HomePage" if domain_part else default
             segments = [s for s in path.split("/") if s and not s.isdigit()]
             if not segments:
-                return default
+                return f"{domain_part}HomePage" if domain_part else default
             name = segments[-1].replace("-", " ").replace("_", " ").title().replace(" ", "")
-            return f"{name}Page"
+            return f"{name}Page" if name else (f"{domain_part}HomePage" if domain_part else default)
         except Exception:
             return default
 
@@ -54,6 +58,10 @@ class ASTNormalizer:
 
         current_url = ""
         current_page_name = "MainPage"
+        for act in actions:
+            if act.get("page_name"):
+                current_page_name = act.get("page_name")
+                break
 
         for action in actions:
             norm_action = self.normalize_step(action)
@@ -64,7 +72,7 @@ class ASTNormalizer:
                     "human_description": norm_action.get("human_description", ""),
                     "code": raw_code,
                     "action": "custom",
-                    "page_name": "MainPage",
+                    "page_name": current_page_name,
                     "value": norm_action.get("value", ""),
                     "selector_info": norm_action.get("selector_info", {})
                 })
@@ -74,6 +82,8 @@ class ASTNormalizer:
             if url:
                 current_url = url
                 current_page_name = action.get("page_name") or self.infer_page_name(url)
+            elif action.get("page_name"):
+                current_page_name = action.get("page_name")
 
             if current_page_name not in pages_dict:
                 pages_dict[current_page_name] = {
@@ -112,7 +122,8 @@ class ASTNormalizer:
                 "action": act_type,
                 "page_name": current_page_name,
                 "value": val,
-                "selector_info": sel
+                "selector_info": sel,
+                "url": url
             }
             if norm_action.get("variable_name"):
                 step_dict["variable_name"] = norm_action["variable_name"]
@@ -152,10 +163,17 @@ class ASTNormalizer:
             for s in processed_steps
         )
 
+        safe_tags = []
+        raw_tags = tags if isinstance(tags, (list, tuple)) else [tags]
+        for t in raw_tags:
+            t_str = str(t).strip().lstrip("@")
+            if t_str and re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', t_str):
+                safe_tags.append(t_str)
+
         test_code = test_template.render(
             scenario_name=scenario_name,
             scenario_description=scenario_description or f"Test scenario for {scenario_name}",
-            tags=[t.lstrip("@") for t in tags],
+            tags=safe_tags,
             test_func_name=test_func_name,
             pom_imports=pom_imports,
             pom_instantiations=pom_instantiations,
@@ -316,6 +334,70 @@ class ASTNormalizer:
             tags=scenario.get("tags", []),
             actions=scenario.get("steps", [])
         )
+
+    @classmethod
+    def patch_scenario_code_with_steps(cls, py_code: str, step_list: List[Dict[str, Any]]) -> str:
+        if not py_code or not py_code.strip():
+            return py_code
+        has_vars = any(
+            bool(s.get("variable_name")) or ("vars.get(" in (s.get("code") or ""))
+            for s in step_list
+        )
+        lines = py_code.splitlines()
+        fn_def_idx = -1
+        for i, line in enumerate(lines):
+            if re.match(r'^\s*def\s+test_[a-zA-Z0-9_]*\(', line):
+                fn_def_idx = i
+                if has_vars:
+                    if "test_data" not in line:
+                        lines[i] = re.sub(
+                            r'\(([^)]*)\):',
+                            lambda m: f"({m.group(1).rstrip()}, test_data):" if m.group(1).strip() else "(page: Page, test_data):",
+                            line
+                        )
+                break
+
+        if has_vars and fn_def_idx != -1:
+            vars_stmt = '    vars = test_data.get("variables", {}) if isinstance(test_data, dict) else {}'
+            has_vars_stmt = any("vars = test_data.get(" in l for l in lines)
+            if not has_vars_stmt:
+                lines.insert(fn_def_idx + 1, vars_stmt)
+
+        for st in step_list:
+            st_code = (st.get("code") or "").strip()
+            if not st_code:
+                continue
+            st_act = st.get("action", "")
+            sel = st.get("selector_info") or {}
+            var_name = sel.get("var_name", "")
+
+            replaced = False
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped == st_code:
+                    replaced = True
+                    break
+                if var_name:
+                    pattern = rf'^\s*([a-zA-Z0-9_]+\.)?(fill|click|press|assert)_[a-zA-Z0-9_]*{re.escape(var_name)}[a-zA-Z0-9_]*\('
+                    if re.search(pattern, stripped):
+                        indent = len(line) - len(stripped)
+                        lines[i] = " " * indent + st_code
+                        replaced = True
+                        break
+                if st_act == "navigate" and ("page.goto(" in stripped or "navigate(" in stripped):
+                    indent = len(line) - len(stripped)
+                    lines[i] = " " * indent + st_code
+                    replaced = True
+                    break
+
+        result = "\n".join(lines)
+        if py_code.endswith("\n"):
+            result += "\n"
+        try:
+            ast.parse(result)
+            return result
+        except Exception:
+            return py_code
 
     @classmethod
     def normalize_step(cls, step_data: Dict[str, Any]) -> Dict[str, Any]:

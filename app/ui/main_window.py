@@ -908,10 +908,76 @@ class StepEditorDialog(QDialog):
         if not human_desc:
             human_desc = SelectorEngine.generate_human_step(act_key, sel_info, val)
 
+        old_code = str(self.step_data.get("code") or "").strip()
+        page_name = self.step_data.get("page_name") or ""
+        if not page_name and old_code:
+            m_page = re.match(r'^([a-zA-Z0-9_]+)\.', old_code)
+            if m_page and m_page.group(1) != "page":
+                page_var = m_page.group(1)
+                page_name = "".join(part.capitalize() for part in page_var.split("_"))
+        if not page_name:
+            page_name = "MainPage"
+
+        page_var = ASTNormalizer._to_snake(page_name)
+
+        if act_key == "navigate":
+            if env_var:
+                step_code = f'page.goto(vars.get("{env_var}", "{val}"))'
+            else:
+                step_code = f'page.goto("{val}")'
+        elif act_key == "wait":
+            ms_val = int(val) if str(val).isdigit() else 1000
+            step_code = f'page.wait_for_timeout({ms_val})'
+        elif act_key == "take_screenshot":
+            step_code = f'page.screenshot(path="{val or "screenshot.png"}")'
+        elif act_key == "assert_title":
+            if env_var:
+                step_code = f'expect(page).to_have_title(vars.get("{env_var}", "{val}"))'
+            else:
+                step_code = f'expect(page).to_have_title("{val}")'
+        elif act_key == "assert_url":
+            if env_var:
+                step_code = f'expect(page).to_have_url(vars.get("{env_var}", "{val}"))'
+            else:
+                step_code = f'expect(page).to_have_url("{val}")'
+        elif act_key == "api_request":
+            if env_var:
+                step_code = f'page.request.get(vars.get("{env_var}", "{val}"))'
+            else:
+                step_code = f'page.request.get("{val}")'
+        elif act_key == "click":
+            step_code = f'{page_var}.click_{var_name}()'
+        elif act_key == "fill":
+            if env_var:
+                step_code = f'{page_var}.fill_{var_name}(vars.get("{env_var}", ""))'
+            else:
+                step_code = f'{page_var}.fill_{var_name}("{val}")'
+        elif act_key == "press":
+            if env_var:
+                step_code = f'{page_var}.press_{var_name}(vars.get("{env_var}", ""))'
+            else:
+                step_code = f'{page_var}.press_{var_name}("{val or "Enter"}")'
+        elif act_key == "assert_visible":
+            step_code = f'{page_var}.assert_{var_name}_visible()'
+        elif act_key == "assert_text":
+            if env_var:
+                step_code = f'{page_var}.assert_{var_name}_contains_text(vars.get("{env_var}", ""))'
+            else:
+                step_code = f'{page_var}.assert_{var_name}_contains_text("{val}")'
+        elif act_key == "assert_value":
+            if env_var:
+                step_code = f'{page_var}.assert_{var_name}_has_value(vars.get("{env_var}", ""))'
+            else:
+                step_code = f'{page_var}.assert_{var_name}_has_value("{val}")'
+        else:
+            step_code = f'{page_var}.{act_key}_{var_name}()'
+
         self.step_data["action"] = act_key
         self.step_data["value"] = val
         self.step_data["selector_info"] = sel_info
         self.step_data["human_description"] = human_desc
+        self.step_data["code"] = step_code
+        self.step_data["page_name"] = page_name
         self.accept()
 
     def get_step_data(self) -> dict:
@@ -4957,27 +5023,37 @@ class ConduitMainWindow(QMainWindow):
         self.append_log("INFO", f"Deleted step {step_idx + 1}: {deleted.get('human_description', '')}")
 
     def _sync_scenario_steps_and_save(self, sc: dict):
+        steps = sc.get("steps", [])
+        current_code = sc.get("code", "")
+        if current_code:
+            patched = self.ast_engine.patch_scenario_code_with_steps(current_code, steps)
+            sc["code"] = patched
+
         try:
             res = self.ast_engine.reconstruct_scenario(sc)
-            sc["code"] = res["test_code"]
-            sc["steps"] = res["steps"]
-            if res.get("pages"):
-                sc["pages"] = res["pages"]
-                for p in res["pages"]:
-                    p_file = os.path.join(self.catalog.pages_dir, p["file_name"])
-                    with open(p_file, "w", encoding="utf-8") as pf:
-                        pf.write(p["code"])
-
-            test_file = os.path.join(self.catalog.tests_dir, sc.get("file_name", f"test_{sc.get('id')}.py"))
-            with open(test_file, "w", encoding="utf-8") as tf:
-                tf.write(res["test_code"])
-
-            self.catalog.add_or_update_scenario(sc)
-            self.select_scenario(sc["id"])
+            if res and res.get("test_code"):
+                sc["code"] = res["test_code"]
+                sc["steps"] = res["steps"]
+                if res.get("pages"):
+                    sc["pages"] = res["pages"]
+                    for p in res["pages"]:
+                        p_file = os.path.join(self.catalog.pages_dir, p["file_name"])
+                        with open(p_file, "w", encoding="utf-8") as pf:
+                            pf.write(p["code"])
         except Exception as ex:
-            self.catalog.add_or_update_scenario(sc)
-            self.select_scenario(sc["id"])
-            self.append_log("WARNING", f"Step synchronized with warning: {ex}")
+            self.append_log("WARNING", f"Full reconstruction note: {ex}")
+
+        test_file_name = sc.get("file_name") or f"test_{sc.get('id', 'scenario')}.py"
+        sc["file_name"] = test_file_name
+        test_file = os.path.join(self.catalog.tests_dir, test_file_name)
+        try:
+            with open(test_file, "w", encoding="utf-8") as tf:
+                tf.write(sc.get("code", ""))
+        except Exception:
+            pass
+
+        self.catalog.add_or_update_scenario(sc)
+        self.select_scenario(sc["id"])
 
     def open_latest_html_report(self):
         report_path = getattr(self, "last_html_report", None) or os.path.join(self.workspace_dir, "reports", "latest_report.html")

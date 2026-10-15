@@ -32,11 +32,13 @@ import pytest
 from app.core.evidence_manager import EvidenceCollector
 
 @pytest.fixture(autouse=True)
-def conduit_step_evidence(page, request):
+def conduit_step_evidence(request):
     enabled = os.environ.get("CONDUIT_CAPTURE_EVIDENCE", "0") == "1"
-    if not enabled:
+    if not enabled or "page" not in request.fixturenames:
         yield
         return
+
+    page = request.getfixturevalue("page")
 
     workspace = os.environ.get("CONDUIT_WORKSPACE", os.getcwd())
     scenario_name = request.node.name

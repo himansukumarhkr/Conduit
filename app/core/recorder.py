@@ -699,11 +699,26 @@ class BrowserRecorder:
                         if str_val and str(vv).strip() == str_val:
                             var_name = vk
                             break
+                    if not var_name:
+                        combined_attrs = f"{meta.get('name', '')} {meta.get('id', '')} {meta.get('placeholder', '')} {meta.get('aria_label', '')} {meta.get('type', '')}".lower()
+                        if meta.get("type", "").lower() == "password" or "pass" in combined_attrs:
+                            for vk in self.variables.keys():
+                                if "pass" in vk.lower():
+                                    var_name = vk
+                                    break
+                        if not var_name and any(k in combined_attrs for k in ["email", "user", "login", "phone"]):
+                            for vk in self.variables.keys():
+                                if any(k in vk.lower() for k in ["user", "email", "login"]):
+                                    var_name = vk
+                                    break
+                        if not var_name:
+                            for vk in self.variables.keys():
+                                if len(vk) > 2 and vk.lower() in combined_attrs:
+                                    var_name = vk
+                                    break
 
                 selector_info = SelectorEngine.rank_selector(meta)
                 if var_name:
-                    if not val:
-                        val = f"{{{{{var_name}}}}}"
                     human_desc = f"Fill '{selector_info.get('display')}' with variable '{var_name}'"
                 else:
                     human_desc = SelectorEngine.generate_human_step(act_type, selector_info, val)
@@ -733,9 +748,10 @@ class BrowserRecorder:
                             same_element = True
 
                     if same_element:
-                        last_action["value"] = val
+                        last_action["value"] = f"{{{{{var_name}}}}}" if var_name else val
                         if var_name:
                             last_action["variable_name"] = var_name
+                            last_action["fallback_value"] = val
                             last_action["human_description"] = human_desc
                         elif not last_action.get("variable_name"):
                             last_action["human_description"] = human_desc
@@ -747,7 +763,7 @@ class BrowserRecorder:
                 step_data = {
                     "action": act_type,
                     "url": url,
-                    "value": val,
+                    "value": f"{{{{{var_name}}}}}" if var_name else val,
                     "meta": meta,
                     "selector_info": selector_info,
                     "human_description": human_desc,
@@ -755,6 +771,7 @@ class BrowserRecorder:
                 }
                 if var_name:
                     step_data["variable_name"] = var_name
+                    step_data["fallback_value"] = val
 
                 self._record_step(step_data)
         except Exception as e:
