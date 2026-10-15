@@ -163,22 +163,29 @@ RECORDER_INJECTED_SCRIPT = """
     }
 
     function fillVariableIntoInput(varName, value) {
-        let target = lastTargetInput;
+        let target = null;
+        if (document.activeElement && isInputLike(document.activeElement)) {
+            target = document.activeElement;
+        } else if (lastTargetInput && document.contains(lastTargetInput) && isInputLike(lastTargetInput)) {
+            target = lastTargetInput;
+        }
+
         const lowerVar = (varName || '').toLowerCase();
         const isPass = lowerVar.includes('pass') || lowerVar.includes('pwd') || lowerVar.includes('secret');
-        const isUser = lowerVar.includes('user') || lowerVar.includes('email') || lowerVar.includes('login');
+        const isUser = lowerVar.includes('user') || lowerVar.includes('email') || lowerVar.includes('login') || lowerVar.includes('phone') || lowerVar.includes('name');
 
         if (isPass) {
             const passEl = document.querySelector('input[type="password"]');
             if (passEl) target = passEl;
         } else if (isUser && (!target || target.type === 'password')) {
-            const userEl = document.querySelector('input[type="email"], input[name*="user"], input[name*="email"], input[id*="user"], input[id*="email"], input[name="login"], input[type="text"]');
+            const userEl = document.querySelector('input[type="email"], input[autocomplete="username"], input[name*="user" i], input[name*="email" i], input[id*="user" i], input[id*="email" i], input[name="login" i], input[placeholder*="user" i], input[placeholder*="email" i], input[type="text"]');
             if (userEl) target = userEl;
         }
 
         if (!target || !document.contains(target) || !isInputLike(target)) {
-            if (document.activeElement && isInputLike(document.activeElement)) {
-                target = document.activeElement;
+            if (lastTargetInput && lastTargetInput.querySelector) {
+                const subInput = lastTargetInput.querySelector('input, textarea, [contenteditable="true"], [role="textbox"]');
+                if (subInput) target = subInput;
             }
         }
         if (!target || !document.contains(target) || !isInputLike(target)) {
@@ -279,7 +286,21 @@ RECORDER_INJECTED_SCRIPT = """
                 }
             }
 
-            let role = (el.getAttribute && el.getAttribute('role')) || '';
+            let ariaLabel = '';
+            if (el.getAttribute) {
+                ariaLabel = el.getAttribute('aria-label') || '';
+                if (!ariaLabel && el.getAttribute('aria-labelledby')) {
+                    try {
+                        const lblElem = document.getElementById(el.getAttribute('aria-labelledby'));
+                        if (lblElem) ariaLabel = (lblElem.innerText || lblElem.textContent || '').trim();
+                    } catch (e) {}
+                }
+            }
+            if (!ariaLabel) ariaLabel = labelText;
+
+            const validRoles = ['alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button', 'caption', 'cell', 'checkbox', 'code', 'columnheader', 'combobox', 'complementary', 'contentinfo', 'definition', 'deletion', 'dialog', 'directory', 'document', 'emphasis', 'feed', 'figure', 'form', 'generic', 'grid', 'gridcell', 'group', 'heading', 'img', 'insertion', 'link', 'list', 'listbox', 'listitem', 'log', 'main', 'marquee', 'math', 'meter', 'menu', 'menubar', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'navigation', 'none', 'note', 'option', 'paragraph', 'presentation', 'progressbar', 'radio', 'radiogroup', 'region', 'row', 'rowgroup', 'rowheader', 'scrollbar', 'search', 'searchbox', 'separator', 'slider', 'spinbutton', 'status', 'strong', 'subscript', 'superscript', 'switch', 'tab', 'table', 'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer', 'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem'];
+            let rawRole = (el.getAttribute && el.getAttribute('role')) || '';
+            let role = validRoles.includes(rawRole.toLowerCase()) ? rawRole.toLowerCase() : '';
             if (!role && el.tagName) {
                 const tag = el.tagName.toLowerCase();
                 if (tag === 'input') {
@@ -430,6 +451,12 @@ RECORDER_INJECTED_SCRIPT = """
 
             if (isInputLike(t)) {
                 lastTargetInput = t;
+            } else if (t.querySelector && t.querySelector('input:not([type="hidden"]), textarea, [role="textbox"], [contenteditable="true"]')) {
+                lastTargetInput = t.querySelector('input:not([type="hidden"]), textarea, [role="textbox"], [contenteditable="true"]');
+            } else if (t.closest && t.closest('label')) {
+                const parentLbl = t.closest('label');
+                const forEl = parentLbl.htmlFor ? document.getElementById(parentLbl.htmlFor) : null;
+                lastTargetInput = forEl || parentLbl.querySelector('input, textarea, [role="textbox"]');
             }
 
             const meta = getElementMeta(t);

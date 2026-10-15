@@ -4,6 +4,35 @@ import re
 
 class SelectorEngine:
 
+    VALID_ARIA_ROLES = {
+        "alert", "alertdialog", "application", "article", "banner", "blockquote", "button",
+        "caption", "cell", "checkbox", "code", "columnheader", "combobox", "complementary",
+        "contentinfo", "definition", "deletion", "dialog", "directory", "document", "emphasis",
+        "feed", "figure", "form", "generic", "grid", "gridcell", "group", "heading", "img",
+        "insertion", "link", "list", "listbox", "listitem", "log", "main", "marquee", "math",
+        "meter", "menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio", "navigation",
+        "none", "note", "option", "paragraph", "presentation", "progressbar", "radio", "radiogroup",
+        "region", "row", "rowgroup", "rowheader", "scrollbar", "search", "searchbox", "separator",
+        "slider", "spinbutton", "status", "strong", "subscript", "superscript", "switch", "tab",
+        "table", "tablist", "tabpanel", "term", "textbox", "time", "timer", "toolbar", "tooltip",
+        "tree", "treegrid", "treeitem"
+    }
+
+    COMMON_HTML_TAGS = {
+        "a", "abbr", "address", "area", "article", "aside", "audio", "b", "base", "bdi",
+        "bdo", "blockquote", "body", "br", "button", "canvas", "caption", "cite", "code",
+        "col", "colgroup", "data", "datalist", "dd", "del", "details", "dfn", "dialog",
+        "div", "dl", "dt", "em", "embed", "fieldset", "figcaption", "figure", "footer",
+        "form", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr",
+        "html", "i", "iframe", "img", "input", "ins", "kbd", "label", "legend", "li",
+        "link", "main", "map", "mark", "menu", "meta", "meter", "nav", "noscript",
+        "object", "ol", "optgroup", "option", "output", "p", "picture", "pre", "progress",
+        "q", "rp", "rt", "ruby", "s", "samp", "script", "search", "section", "select",
+        "small", "source", "span", "strong", "style", "sub", "summary", "sup", "table",
+        "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time", "title",
+        "tr", "track", "u", "ul", "var", "video", "wbr"
+    }
+
     @staticmethod
     def clean_identifier(text: str) -> str:
         if not text:
@@ -46,17 +75,37 @@ class SelectorEngine:
                 "display": f"data-testid='{testid}'"
             })
 
-        if role and (aria_label or text):
+        if tag == "input" and attrs.get("type") == "password":
+            var_name = "password_input" if not element_id else f"{cls.clean_identifier(element_id)}_input"
+            candidates.append({
+                "rank": 95,
+                "strategy": "password_input",
+                "code": 'page.locator("input[type=\'password\']")' if not element_id else f'page.locator("#{element_id}")',
+                "locator_expr": 'self.page.locator("input[type=\'password\']")' if not element_id else f'self.page.locator("#{element_id}")',
+                "var_name": var_name,
+                "display": "input[type='password']" if not element_id else f"#{element_id}"
+            })
+
+        role_clean = role.lower().strip() if role else ""
+        if role_clean and role_clean not in cls.VALID_ARIA_ROLES:
+            role_clean = ""
+        if not role_clean:
+            if tag == "button" or attrs.get("type") in ("button", "submit"):
+                role_clean = "button"
+            elif tag in ("input", "textarea") and attrs.get("type") not in ("checkbox", "radio", "submit", "button"):
+                role_clean = "textbox"
+
+        if role_clean and (aria_label or text):
             accessible_name = aria_label or (text[:30] if len(text) <= 30 else text[:25] + "...")
             clean_name = cls.clean_identifier(accessible_name)
-            var_name = f"{clean_name}_{role}" if clean_name else f"{role}_element"
+            var_name = f"{clean_name}_{role_clean}" if clean_name else f"{role_clean}_element"
             candidates.append({
                 "rank": 90,
                 "strategy": "role",
-                "code": f'page.get_by_role("{role}", name="{accessible_name}")',
-                "locator_expr": f'self.page.get_by_role("{role}", name="{accessible_name}")',
+                "code": f'page.get_by_role("{role_clean}", name="{accessible_name}")',
+                "locator_expr": f'self.page.get_by_role("{role_clean}", name="{accessible_name}")',
                 "var_name": cls.clean_identifier(var_name),
-                "display": f"role='{role}', name='{accessible_name}'"
+                "display": f"role='{role_clean}', name='{accessible_name}'"
             })
 
         if aria_label:
@@ -81,37 +130,27 @@ class SelectorEngine:
                 "display": f"placeholder='{placeholder}'"
             })
 
-        if tag == "input" and attrs.get("type") == "password":
-            var_name = "password_input" if not element_id else f"{cls.clean_identifier(element_id)}_input"
-            candidates.append({
-                "rank": 70,
-                "strategy": "password_input",
-                "code": 'page.locator("input[type=\'password\']")' if not element_id else f'page.locator("#{element_id}")',
-                "locator_expr": 'self.page.locator("input[type=\'password\']")' if not element_id else f'self.page.locator("#{element_id}")',
-                "var_name": var_name,
-                "display": "input[type='password']" if not element_id else f"#{element_id}"
-            })
-
-        if text and len(text) < 40 and "\n" not in text:
-            var_name = f"{cls.clean_identifier(text)}_{tag}"
-            candidates.append({
-                "rank": 65,
-                "strategy": "text",
-                "code": f'page.get_by_text("{text}", exact=True)',
-                "locator_expr": f'self.page.get_by_text("{text}", exact=True)',
-                "var_name": var_name,
-                "display": f"text='{text}'"
-            })
-
         if name_attr and not re.search(r'\d{5,}', name_attr):
             var_name = f"{cls.clean_identifier(name_attr)}_field"
             candidates.append({
-                "rank": 55,
+                "rank": 60,
                 "strategy": "name",
                 "code": f'page.locator("[name=\'{name_attr}\']")',
                 "locator_expr": f'self.page.locator("[name=\'{name_attr}\']")',
                 "var_name": var_name,
                 "display": f"name='{name_attr}'"
+            })
+
+        if text and len(text) < 40 and "\n" not in text:
+            var_name = f"{cls.clean_identifier(text)}_{tag}"
+            text_rank = 55 if tag not in ("input", "textarea") else 25
+            candidates.append({
+                "rank": text_rank,
+                "strategy": "text",
+                "code": f'page.get_by_text("{text}", exact=True)',
+                "locator_expr": f'self.page.get_by_text("{text}", exact=True)',
+                "var_name": var_name,
+                "display": f"text='{text}'"
             })
 
         if element_id and not re.search(r'(:\w+:|[0-9a-f]{8,}|[0-9]{5,})', element_id):
@@ -159,6 +198,8 @@ class SelectorEngine:
             role_m = re.match(r"^(?:role=)?['\"]?([a-zA-Z0-9_-]+)['\"]?(?:,\s*name=['\"]([^'\"]*)['\"])?", s)
             if role_m:
                 role_type = role_m.group(1)
+                if role_type.lower() in ("div", "span"):
+                    role_type = "button" if "btn" in s.lower() or "button" in s.lower() or "login" in s.lower() or "log in" in s.lower() else "textbox"
                 name_attr = role_m.group(2)
                 if name_attr:
                     return {
@@ -244,6 +285,43 @@ class SelectorEngine:
                 "display": f"placeholder='{clean_ph}'"
             }
         else:
+            s_clean = s.strip()
+            s_lower = s_clean.lower()
+            has_css_meta = any(ch in s_clean for ch in ('#', '.', '[', ']', '>', '+', '~', ':', ','))
+            words = s_clean.split()
+            if not has_css_meta and len(words) > 1 and words[-1].lower() in ("div", "span", "button", "input", "a", "link", "p"):
+                tag_suffix = words[-1].lower()
+                front_text = " ".join(words[:-1]).strip()
+                if tag_suffix in ("button", "div") or "login" in front_text.lower() or "continue" in front_text.lower():
+                    expr = f'self.page.locator("button:has-text(\'{front_text}\'), [role=\'button\']:has-text(\'{front_text}\'), input[value=\'{front_text}\'], {tag_suffix}:has-text(\'{front_text}\')")'
+                    code = f'page.locator("button:has-text(\'{front_text}\'), [role=\'button\']:has-text(\'{front_text}\'), input[value=\'{front_text}\'], {tag_suffix}:has-text(\'{front_text}\')")'
+                else:
+                    expr = f'self.page.locator("{tag_suffix}:has-text(\'{front_text}\')")'
+                    code = f'page.locator("{tag_suffix}:has-text(\'{front_text}\')")'
+                return {
+                    "strategy": "css",
+                    "code": code,
+                    "locator_expr": expr,
+                    "var_name": var_name,
+                    "display": s_clean
+                }
+            elif not has_css_meta and s_lower not in cls.COMMON_HTML_TAGS:
+                if any(k in s_lower for k in ("user", "login", "email", "phone")):
+                    expr = f'self.page.locator("[name=\'{s_clean}\'], [name=\'email\'], #email, #{s_clean}, [data-testid=\'{s_clean}\'], input[autocomplete*=\'username\' i], input[placeholder*=\'{s_clean}\' i], input[placeholder*=\'email\' i], input[type=\'text\'], input[type=\'email\']")'
+                    code = f'page.locator("[name=\'{s_clean}\'], [name=\'email\'], #email, #{s_clean}, [data-testid=\'{s_clean}\'], input[autocomplete*=\'username\' i], input[placeholder*=\'{s_clean}\' i], input[placeholder*=\'email\' i], input[type=\'text\'], input[type=\'email\']")'
+                elif any(k in s_lower for k in ("pass", "pwd", "secret")):
+                    expr = f'self.page.locator("input[type=\'password\'], [name=\'{s_clean}\'], #{s_clean}, [data-testid=\'{s_clean}\'], input[placeholder*=\'{s_clean}\' i]")'
+                    code = f'page.locator("input[type=\'password\'], [name=\'{s_clean}\'], #{s_clean}, [data-testid=\'{s_clean}\'], input[placeholder*=\'{s_clean}\' i]")'
+                else:
+                    expr = f'self.page.locator("[name=\'{s_clean}\'], #{s_clean}, [data-testid=\'{s_clean}\'], [aria-label*=\'{s_clean}\' i], input[placeholder*=\'{s_clean}\' i]")'
+                    code = f'page.locator("[name=\'{s_clean}\'], #{s_clean}, [data-testid=\'{s_clean}\'], [aria-label*=\'{s_clean}\' i], input[placeholder*=\'{s_clean}\' i]")'
+                return {
+                    "strategy": "css",
+                    "code": code,
+                    "locator_expr": expr,
+                    "var_name": var_name,
+                    "display": s_clean
+                }
             return {
                 "strategy": "css",
                 "code": f'page.locator({repr(s)})',

@@ -191,17 +191,92 @@ def browser_context_args(browser_context_args):
                     self.scenarios = data.get("scenarios", [])
                     self._normalize_scenarios()
                     healed_any = False
+                    user_loc_replacement = 'locator("[name=\'username\'], [name=\'email\'], #email, #username, [data-testid=\'username\'], input[autocomplete*=\'username\' i], input[placeholder*=\'username\' i], input[placeholder*=\'email\' i], input[type=\'text\'], input[type=\'email\']")'
+                    pass_loc_replacement = 'locator("input[type=\'password\'], [name=\'password\'], #password, [data-testid=\'password\']")'
+
                     for sc in self.scenarios:
+                        sc_healed = False
+                        for st in sc.get("steps", []):
+                            s_info = st.get("selector_info") or {}
+                            loc = s_info.get("locator_expr", "")
+                            act = st.get("action", "")
+                            if act == "fill" and ("user" in str(st.get("variable_name", "")).lower() or "user" in str(s_info.get("var_name", "")).lower()):
+                                if loc in ("self.page.locator('username')", "self.page.locator('Username')", "self.page.locator('body')"):
+                                    s_info["locator_expr"] = f"self.page.{user_loc_replacement}"
+                                    s_info["code"] = f"page.{user_loc_replacement}"
+                                    st["selector_info"] = s_info
+                                    sc_healed = True
+                            elif act == "fill" and ("pass" in str(st.get("variable_name", "")).lower() or "pass" in str(s_info.get("var_name", "")).lower()):
+                                if loc in ("self.page.locator('password')", "self.page.locator('Password')", "self.page.locator('body')") or "get_by_text" in loc:
+                                    s_info["locator_expr"] = f"self.page.{pass_loc_replacement}"
+                                    s_info["code"] = f"page.{pass_loc_replacement}"
+                                    st["selector_info"] = s_info
+                                    sc_healed = True
+                            elif act == "click" and ('get_by_role("div"' in loc or "get_by_role('div'" in loc or 'get_by_role("span"' in loc or "get_by_role('span'" in loc):
+                                m_n = re.search(r'name=[\'"]([^\'"]*)[\'"]', loc)
+                                nm = m_n.group(1) if m_n else "button"
+                                rep = f'locator("button:has-text(\'{nm}\'), [role=\'button\']:has-text(\'{nm}\'), input[value=\'{nm}\'], div:has-text(\'{nm}\')")'
+                                s_info["locator_expr"] = f"self.page.{rep}"
+                                s_info["code"] = f"page.{rep}"
+                                st["selector_info"] = s_info
+                                sc_healed = True
+
                         for page in sc.get("pages", []):
                             p_code = page.get("code", "")
+                            orig_p_code = p_code
                             if "role='role=" in p_code or 'get_by_role("role=' in p_code or "get_by_role('role=" in p_code:
-                                page["code"] = re.sub(
+                                p_code = re.sub(
                                     r'get_by_role\([\'"]role=[\'"]([a-zA-Z0-9_-]+)[\'"],\s*name=[\'"]([^\'"]*)[\'"]\)',
                                     r'get_by_role("\1", name="\2")',
                                     p_code
                                 )
-                                healed_any = True
-                                self._write_scenario_files(sc)
+                            if 'get_by_role("div"' in p_code or "get_by_role('div'" in p_code or 'get_by_role("span"' in p_code or "get_by_role('span'" in p_code:
+                                p_code = re.sub(
+                                    r'get_by_role\([\'"](?:div|span)[\'"],\s*name=[\'"]([^\'"]*)[\'"]\)',
+                                    r'locator("button:has-text(\'\1\'), [role=\'button\']:has-text(\'\1\'), input[value=\'\1\'], div:has-text(\'\1\')")',
+                                    p_code
+                                )
+                            if "locator('username')" in p_code or "locator('Username')" in p_code:
+                                p_code = re.sub(
+                                    r"locator\([\'\"][Uu]sername[\'\"]\)",
+                                    user_loc_replacement,
+                                    p_code
+                                )
+                            if "locator('password')" in p_code or "locator('Password')" in p_code:
+                                p_code = re.sub(
+                                    r"locator\([\'\"][Pp]assword[\'\"]\)",
+                                    pass_loc_replacement,
+                                    p_code
+                                )
+                            if "get_by_text('Password', exact=True)" in p_code or 'get_by_text("Password", exact=True)' in p_code:
+                                p_code = re.sub(
+                                    r"get_by_text\([\'\"]Password[\'\"],\s*exact=True\)",
+                                    pass_loc_replacement,
+                                    p_code
+                                )
+                            if "self.Username" in p_code or "fill_Username" in p_code:
+                                p_code = p_code.replace("self.Username", "self.username").replace("fill_Username", "fill_username")
+                            if "self.Password" in p_code or "fill_Password" in p_code:
+                                p_code = p_code.replace("self.Password", "self.password").replace("fill_Password", "fill_password")
+
+                            if p_code != orig_p_code:
+                                page["code"] = p_code
+                                sc_healed = True
+
+                        sc_code = sc.get("code", "")
+                        orig_sc_code = sc_code
+                        if "fill_Username" in sc_code:
+                            sc_code = sc_code.replace("fill_Username", "fill_username")
+                        if "fill_Password" in sc_code:
+                            sc_code = sc_code.replace("fill_Password", "fill_password")
+                        if sc_code != orig_sc_code:
+                            sc["code"] = sc_code
+                            sc_healed = True
+
+                        if sc_healed:
+                            healed_any = True
+                            self._write_scenario_files(sc)
+
                         for page in sc.get("pages", []):
                             p_file = page.get("file_name")
                             if p_file and not os.path.exists(os.path.join(self.pages_dir, p_file)):
@@ -217,14 +292,63 @@ def browser_context_args(browser_context_args):
                                 try:
                                     with open(p_path, "r", encoding="utf-8") as f:
                                         p_txt = f.read()
+                                    orig_txt = p_txt
                                     if "role='role=" in p_txt or 'get_by_role("role=' in p_txt or "get_by_role('role=" in p_txt:
-                                        cleaned = re.sub(
+                                        p_txt = re.sub(
                                             r'get_by_role\([\'"]role=[\'"]([a-zA-Z0-9_-]+)[\'"],\s*name=[\'"]([^\'"]*)[\'"]\)',
                                             r'get_by_role("\1", name="\2")',
                                             p_txt
                                         )
+                                    if 'get_by_role("div"' in p_txt or "get_by_role('div'" in p_txt or 'get_by_role("span"' in p_txt or "get_by_role('span'" in p_txt:
+                                        p_txt = re.sub(
+                                            r'get_by_role\([\'"](?:div|span)[\'"],\s*name=[\'"]([^\'"]*)[\'"]\)',
+                                            r'locator("button:has-text(\'\1\'), [role=\'button\']:has-text(\'\1\'), input[value=\'\1\'], div:has-text(\'\1\')")',
+                                            p_txt
+                                        )
+                                    if "locator('username')" in p_txt or "locator('Username')" in p_txt:
+                                        p_txt = re.sub(
+                                            r"locator\([\'\"][Uu]sername[\'\"]\)",
+                                            user_loc_replacement,
+                                            p_txt
+                                        )
+                                    if "locator('password')" in p_txt or "locator('Password')" in p_txt:
+                                        p_txt = re.sub(
+                                            r"locator\([\'\"][Pp]assword[\'\"]\)",
+                                            pass_loc_replacement,
+                                            p_txt
+                                        )
+                                    if "get_by_text('Password', exact=True)" in p_txt or 'get_by_text("Password", exact=True)' in p_txt:
+                                        p_txt = re.sub(
+                                            r"get_by_text\([\'\"]Password[\'\"],\s*exact=True\)",
+                                            pass_loc_replacement,
+                                            p_txt
+                                        )
+                                    if "self.Username" in p_txt or "fill_Username" in p_txt:
+                                        p_txt = p_txt.replace("self.Username", "self.username").replace("fill_Username", "fill_username")
+                                    if "self.Password" in p_txt or "fill_Password" in p_txt:
+                                        p_txt = p_txt.replace("self.Password", "self.password").replace("fill_Password", "fill_password")
+
+                                    if p_txt != orig_txt:
                                         with open(p_path, "w", encoding="utf-8") as f:
-                                            f.write(cleaned)
+                                            f.write(p_txt)
+                                except Exception:
+                                    pass
+
+                    if os.path.exists(self.tests_dir):
+                        for tf in os.listdir(self.tests_dir):
+                            if tf.endswith(".py"):
+                                t_path = os.path.join(self.tests_dir, tf)
+                                try:
+                                    with open(t_path, "r", encoding="utf-8") as f:
+                                        t_txt = f.read()
+                                    orig_t = t_txt
+                                    if "fill_Username" in t_txt:
+                                        t_txt = t_txt.replace("fill_Username", "fill_username")
+                                    if "fill_Password" in t_txt:
+                                        t_txt = t_txt.replace("fill_Password", "fill_password")
+                                    if t_txt != orig_t:
+                                        with open(t_path, "w", encoding="utf-8") as f:
+                                            f.write(t_txt)
                                 except Exception:
                                     pass
                     return

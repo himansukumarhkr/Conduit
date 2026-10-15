@@ -882,9 +882,11 @@ class StepEditorDialog(QDialog):
         raw_sel = self.selector_edit.text().strip()
         var_name = self.var_name_edit.text().strip()
         if not var_name and raw_sel:
-            var_name = SelectorEngine.clean_identifier(raw_sel)
+            var_name = SelectorEngine.clean_identifier(raw_sel).lower()
         elif not var_name:
             var_name = "element"
+        else:
+            var_name = SelectorEngine.clean_identifier(var_name).lower()
 
         cur_sel = self.step_data.get("selector_info") or {}
         if cur_sel and cur_sel.get("locator_expr") and (not raw_sel or raw_sel == cur_sel.get("display") or raw_sel == cur_sel.get("var_name")):

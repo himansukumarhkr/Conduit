@@ -96,22 +96,43 @@ class ASTNormalizer:
 
             page_data = pages_dict[current_page_name]
             sel = norm_action.get("selector_info") or {}
-            var_name = sel.get("var_name", "element")
+            var_name = self._to_snake(sel.get("var_name", "element")).lower()
+            sel["var_name"] = var_name
             locator_expr = sel.get("locator_expr", "")
-            if not locator_expr or locator_expr == "self.page.locator('body')":
+            if not locator_expr or locator_expr == "self.page.locator('body')" or locator_expr in ("self.page.locator('username')", "self.page.locator('Username')", "self.page.locator('password')", "self.page.locator('Password')"):
                 display_q = sel.get("display") or var_name
                 strat = sel.get("strategy", "css")
                 loc_cand = SelectorEngine.create_custom_selector(strat, display_q, var_name)
                 locator_expr = loc_cand.get("locator_expr", "self.page.locator('body')")
-            elif "role='role=" in locator_expr or 'get_by_role("role=' in locator_expr or "get_by_role('role=" in locator_expr or ("role='" in locator_expr and "name=" in locator_expr and 'get_by_role("' in locator_expr and ', name=' not in locator_expr):
+
+            if "role='role=" in locator_expr or 'get_by_role("role=' in locator_expr or "get_by_role('role=" in locator_expr or ("role='" in locator_expr and "name=" in locator_expr and 'get_by_role("' in locator_expr and ', name=' not in locator_expr):
                 m_fix = re.search(r"role=['\"]([a-zA-Z0-9_-]+)['\"](?:,\s*name=['\"]([^'\"]*)['\"])?", locator_expr)
                 if m_fix:
-                    r_type = m_fix.group(1)
+                    r_type = m_fix.group(1).lower()
                     r_name = m_fix.group(2)
+                    if r_type not in SelectorEngine.VALID_ARIA_ROLES:
+                        r_type = "button" if "btn" in locator_expr.lower() or "button" in locator_expr.lower() or "log in" in locator_expr.lower() else "textbox"
                     if r_name:
                         locator_expr = f'self.page.get_by_role("{r_type}", name="{r_name}")'
                     else:
                         locator_expr = f'self.page.get_by_role("{r_type}")'
+            elif 'get_by_role("div"' in locator_expr or "get_by_role('div'" in locator_expr or 'get_by_role("span"' in locator_expr or "get_by_role('span'" in locator_expr:
+                m_role = re.search(r'get_by_role\([\'"][a-zA-Z0-9_-]+[\'"](?:,\s*name=[\'"]([^\'"]*)[\'"])?\)', locator_expr)
+                btn_name = m_role.group(1) if m_role else ""
+                if btn_name:
+                    locator_expr = f'self.page.locator("button:has-text(\'{btn_name}\'), [role=\'button\']:has-text(\'{btn_name}\'), input[value=\'{btn_name}\'], div:has-text(\'{btn_name}\')")'
+                else:
+                    locator_expr = 'self.page.locator("button, [role=\'button\']")'
+
+            if act_type == "fill":
+                if "user" in var_name or "email" in var_name or "login" in var_name:
+                    if locator_expr in ("self.page.locator('username')", "self.page.locator('Username')", "self.page.locator('body')"):
+                        locator_expr = 'self.page.locator("[name=\'username\'], [name=\'email\'], #email, #username, [data-testid=\'username\'], input[autocomplete*=\'username\' i], input[placeholder*=\'username\' i], input[placeholder*=\'email\' i], input[type=\'text\'], input[type=\'email\']")'
+                elif "pass" in var_name or "pwd" in var_name or "secret" in var_name:
+                    if locator_expr in ("self.page.locator('password')", "self.page.locator('Password')", "self.page.locator('body')") or "get_by_text" in locator_expr:
+                        locator_expr = 'self.page.locator("input[type=\'password\'], [name=\'password\'], #password, [data-testid=\'password\']")'
+
+            sel["locator_expr"] = locator_expr
 
             val = norm_action.get("value", "")
 
@@ -228,6 +249,7 @@ class ASTNormalizer:
         self, page_class: str, act_type: str, var_name: str, val: str, action: Dict[str, Any]
     ) -> Tuple[str, Dict[str, Any]]:
         page_var = self._to_snake(page_class)
+        var_name = self._to_snake(var_name).lower()
         var_key, fallback_val = self._get_variable_info(action, val)
 
         if act_type == "navigate":
@@ -469,7 +491,7 @@ class ASTNormalizer:
                     break
                 if var_name:
                     pattern = rf'^\s*([a-zA-Z0-9_]+\.)?(fill|click|press|assert)_[a-zA-Z0-9_]*{re.escape(var_name)}[a-zA-Z0-9_]*\('
-                    if re.search(pattern, stripped):
+                    if re.search(pattern, stripped, re.IGNORECASE):
                         indent = len(line) - len(stripped)
                         lines[i] = " " * indent + st_code
                         replaced = True
@@ -663,12 +685,16 @@ class ASTNormalizer:
                 sel = sel if isinstance(sel, dict) else {}
 
         if isinstance(sel, dict):
+            if sel.get("var_name"):
+                sel["var_name"] = SelectorEngine.clean_identifier(sel["var_name"]).lower()
             loc_expr = sel.get("locator_expr", "")
             if "role='role=" in loc_expr or 'get_by_role("role=' in loc_expr or "get_by_role('role=" in loc_expr or ("role='" in loc_expr and "name=" in loc_expr and 'get_by_role("' in loc_expr and ', name=' not in loc_expr):
                 m_fix = re.search(r"role=['\"]([a-zA-Z0-9_-]+)['\"](?:,\s*name=['\"]([^'\"]*)['\"])?", loc_expr)
                 if m_fix:
-                    r_type = m_fix.group(1)
+                    r_type = m_fix.group(1).lower()
                     r_name = m_fix.group(2)
+                    if r_type not in SelectorEngine.VALID_ARIA_ROLES:
+                        r_type = "button" if "btn" in loc_expr.lower() or "button" in loc_expr.lower() or "log in" in loc_expr.lower() else "textbox"
                     if r_name:
                         sel["strategy"] = "role"
                         sel["locator_expr"] = f'self.page.get_by_role("{r_type}", name="{r_name}")'
@@ -679,6 +705,25 @@ class ASTNormalizer:
                         sel["locator_expr"] = f'self.page.get_by_role("{r_type}")'
                         sel["code"] = f'page.get_by_role("{r_type}")'
                         sel["display"] = f"role='{r_type}'"
+            elif 'get_by_role("div"' in loc_expr or "get_by_role('div'" in loc_expr or 'get_by_role("span"' in loc_expr or "get_by_role('span'" in loc_expr:
+                m_role = re.search(r'get_by_role\([\'"][a-zA-Z0-9_-]+[\'"](?:,\s*name=[\'"]([^\'"]*)[\'"])?\)', loc_expr)
+                btn_name = m_role.group(1) if m_role else ""
+                if btn_name:
+                    sel["strategy"] = "css"
+                    sel["locator_expr"] = f'self.page.locator("button:has-text(\'{btn_name}\'), [role=\'button\']:has-text(\'{btn_name}\'), input[value=\'{btn_name}\'], div:has-text(\'{btn_name}\')")'
+                    sel["code"] = f'page.locator("button:has-text(\'{btn_name}\'), [role=\'button\']:has-text(\'{btn_name}\'), input[value=\'{btn_name}\'], div:has-text(\'{btn_name}\')")'
+                    sel["display"] = f"button:has-text('{btn_name}')"
+
+            if act == "fill":
+                v_name = (sel.get("var_name") or "").lower()
+                if "user" in v_name or "email" in v_name or "login" in v_name:
+                    if loc_expr in ("self.page.locator('username')", "self.page.locator('Username')", "self.page.locator('body')"):
+                        sel["locator_expr"] = 'self.page.locator("[name=\'username\'], [name=\'email\'], #email, #username, [data-testid=\'username\'], input[autocomplete*=\'username\' i], input[placeholder*=\'username\' i], input[placeholder*=\'email\' i], input[type=\'text\'], input[type=\'email\']")'
+                        sel["code"] = 'page.locator("[name=\'username\'], [name=\'email\'], #email, #username, [data-testid=\'username\'], input[autocomplete*=\'username\' i], input[placeholder*=\'username\' i], input[placeholder*=\'email\' i], input[type=\'text\'], input[type=\'email\']")'
+                elif "pass" in v_name or "pwd" in v_name or "secret" in v_name:
+                    if loc_expr in ("self.page.locator('password')", "self.page.locator('Password')", "self.page.locator('body')") or "get_by_text" in loc_expr:
+                        sel["locator_expr"] = 'self.page.locator("input[type=\'password\'], [name=\'password\'], #password, [data-testid=\'password\']")'
+                        sel["code"] = 'page.locator("input[type=\'password\'], [name=\'password\'], #password, [data-testid=\'password\']")'
 
         data["action"] = act
         data["value"] = val
