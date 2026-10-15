@@ -279,8 +279,25 @@ RECORDER_INJECTED_SCRIPT = """
                 }
             }
 
-            const ariaLabel = (el.getAttribute && el.getAttribute('aria-label')) || labelText || '';
-            const role = (el.getAttribute && el.getAttribute('role')) || (el.tagName && el.tagName.toLowerCase() === 'input' ? (attrs.type === 'password' ? 'password' : 'textbox') : (el.tagName ? el.tagName.toLowerCase() : 'element'));
+            let role = (el.getAttribute && el.getAttribute('role')) || '';
+            if (!role && el.tagName) {
+                const tag = el.tagName.toLowerCase();
+                if (tag === 'input') {
+                    role = (attrs.type === 'submit' || attrs.type === 'button') ? 'button' : (attrs.type === 'checkbox' ? 'checkbox' : (attrs.type === 'radio' ? 'radio' : 'textbox'));
+                } else if (tag === 'button') {
+                    role = 'button';
+                } else if (tag === 'a' && el.hasAttribute('href')) {
+                    role = 'link';
+                } else if (tag === 'select') {
+                    role = 'combobox';
+                } else if (tag === 'textarea') {
+                    role = 'textbox';
+                } else if (/^h[1-6]$/.test(tag)) {
+                    role = 'heading';
+                } else if (tag === 'img') {
+                    role = 'img';
+                }
+            }
 
             return {
                 tag: el.tagName ? el.tagName.toLowerCase() : 'element',
