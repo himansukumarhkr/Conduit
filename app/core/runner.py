@@ -37,6 +37,18 @@ class TestRunner:
         if on_log:
             on_log("INFO", f"{prefix}Starting scenario: {scenario_name}")
 
+        browser_channel_arg = ""
+        if browser in ("msedge", "chrome"):
+            browser_channel_arg = f"--browser-channel={browser}"
+        elif browser == "chromium":
+            browser_channel_arg = ""
+        else:
+            browser_channel_arg = "--browser-channel=msedge"
+
+        slowmo = 0
+        if not headless:
+            slowmo = int(os.environ.get("CONDUIT_SLOWMO_MS", "500"))
+
         cmd = [
             sys.executable,
             "-m", "pytest",
@@ -44,8 +56,9 @@ class TestRunner:
             "-v",
             "--tb=short",
             "-s",
-            f"--browser-channel={browser}" if browser in ("msedge", "chrome") else "",
-            "--headed" if not headless else ""
+            browser_channel_arg,
+            "--headed" if not headless else "",
+            f"--slowmo={slowmo}" if not headless and slowmo > 0 else ""
         ]
         cmd = [arg for arg in cmd if arg]
 
@@ -59,6 +72,12 @@ class TestRunner:
         env_vars["CONDUIT_CAPTURE_EVIDENCE"] = "1" if capture_evidence else "0"
         env_vars["CONDUIT_EVIDENCE_FORMAT"] = evidence_format
         env_vars["CONDUIT_WORKER_ID"] = str(worker_id)
+        env_vars["CONDUIT_HEADLESS"] = "1" if headless else "0"
+        if not headless:
+            env_vars["CONDUIT_HOLD_BROWSER_SECS"] = os.environ.get("CONDUIT_HOLD_BROWSER_SECS", "3")
+            env_vars["CONDUIT_HOLD_ON_FAILURE_SECS"] = os.environ.get("CONDUIT_HOLD_ON_FAILURE_SECS", "5")
+            if os.environ.get("CONDUIT_HOLD_BROWSER"):
+                env_vars["CONDUIT_HOLD_BROWSER"] = os.environ.get("CONDUIT_HOLD_BROWSER")
 
         sc_start = time.time()
         sc_passed = False

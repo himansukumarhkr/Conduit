@@ -244,3 +244,34 @@ def test_recorder_injected_script_validity_and_events():
         assert "fill" in actions or "press" in actions
         browser.close()
 
+
+def test_runner_headed_and_hold_flags():
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        runner = TestRunner(tmp)
+        test_file = os.path.join(tmp, "dummy_headed.py")
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("def test_dummy(): pass\n")
+
+        logs = []
+        finished = []
+        os.environ["CONDUIT_HOLD_BROWSER_SECS"] = "0"
+        os.environ["CONDUIT_SLOWMO_MS"] = "0"
+        runner.run_tests_async(
+            test_file_paths=[test_file],
+            browser="msedge",
+            headless=False,
+            env="QA",
+            on_log=lambda l, m: logs.append((l, m)),
+            on_finished=lambda r: finished.append(r)
+        )
+
+        import time
+        for _ in range(40):
+            if finished:
+                break
+            time.sleep(0.2)
+
+        assert len(finished) == 1
+        assert finished[0]["status"] in ("Passed", "Failed")
+
+

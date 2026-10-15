@@ -1142,6 +1142,14 @@ class SettingsDialog(QDialog):
         self.headless_chk.setChecked(self.settings_data.get("headless", True))
         layout.addWidget(self.headless_chk)
 
+        layout.addWidget(QLabel("Slow-Motion Delay in Headed Mode (ms)"))
+        self.slowmo_edit = QLineEdit(str(self.settings_data.get("slowmo_ms", 500)))
+        layout.addWidget(self.slowmo_edit)
+
+        layout.addWidget(QLabel("Browser Hold After Test (seconds)"))
+        self.hold_secs_edit = QLineEdit(str(self.settings_data.get("hold_browser_secs", 3)))
+        layout.addWidget(self.hold_secs_edit)
+
         self.traces_chk = QCheckBox("Capture Playwright Traces on Failure")
         self.traces_chk.setChecked(self.settings_data.get("record_traces", True))
         layout.addWidget(self.traces_chk)
@@ -1301,6 +1309,14 @@ class SettingsDialog(QDialog):
         except ValueError:
             self.settings_data["timeout"] = 5000
         self.settings_data["headless"] = self.headless_chk.isChecked()
+        try:
+            self.settings_data["slowmo_ms"] = max(0, int(self.slowmo_edit.text().strip()))
+        except ValueError:
+            self.settings_data["slowmo_ms"] = 500
+        try:
+            self.settings_data["hold_browser_secs"] = max(0, int(self.hold_secs_edit.text().strip()))
+        except ValueError:
+            self.settings_data["hold_browser_secs"] = 3
         self.settings_data["record_traces"] = self.traces_chk.isChecked()
         self.settings_data["capture_evidence"] = self.evidence_chk.isChecked()
         f_idx = self.format_combo.currentIndex()
@@ -3436,6 +3452,9 @@ class ConduitMainWindow(QMainWindow):
             "env": self.current_env,
             "timeout": 5000,
             "headless": True,
+            "slowmo_ms": 500,
+            "hold_browser_secs": 3,
+            "hold_browser_mode": "3s",
             "record_traces": True,
             "capture_evidence": True,
             "evidence_format": "both",
@@ -3907,6 +3926,13 @@ class ConduitMainWindow(QMainWindow):
         self.headless_btn.clicked.connect(self.toggle_headless)
         b_layout.addWidget(self.headless_btn)
 
+        self.hold_btn = QPushButton("Hold: 3s")
+        self.hold_btn.setCursor(Qt.PointingHandCursor)
+        self.hold_btn.setStyleSheet("background-color: transparent; color: #38bdf8; font-size: 11px; padding: 3px 6px; border: 1px solid #243048; border-radius: 4px;")
+        self.hold_btn.clicked.connect(self.cycle_hold_mode)
+        self.hold_btn.setVisible(not self.headless)
+        b_layout.addWidget(self.hold_btn)
+
         workers_count = self.settings.get("workers", 1)
         w_lbl = f"⚡ {workers_count} Worker" if workers_count == 1 else (f"⚡ {workers_count} Workers" if str(workers_count).isdigit() else "⚡ Auto Workers")
         self.btn_workers = QPushButton(w_lbl)
@@ -4133,7 +4159,26 @@ class ConduitMainWindow(QMainWindow):
         color = "#94a3b8" if self.headless else "#38bdf8"
         self.headless_btn.setText(f"Headless: {state_str}")
         self.headless_btn.setStyleSheet(f"background-color: transparent; color: {color}; font-size: 11px; padding: 4px 6px; border: 1px solid #334155; border-radius: 4px;")
+        if hasattr(self, "hold_btn"):
+            self.hold_btn.setVisible(not self.headless)
         self.append_log("INFO", f"Headless mode toggled {state_str}")
+
+    def cycle_hold_mode(self):
+        modes = ["3s", "10s", "Keep Open", "0s"]
+        cur_mode = self.settings.get("hold_browser_mode", "3s")
+        next_idx = (modes.index(cur_mode) + 1) % len(modes) if cur_mode in modes else 0
+        new_mode = modes[next_idx]
+        self.settings["hold_browser_mode"] = new_mode
+        if new_mode == "Keep Open":
+            self.settings["hold_browser_secs"] = 0
+            self.hold_btn.setText("Keep Open: Manual")
+            self.hold_btn.setStyleSheet("background-color: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 11px; font-weight: bold; padding: 3px 6px; border: 1px solid #38bdf8; border-radius: 4px;")
+        else:
+            secs = int(new_mode.replace("s", ""))
+            self.settings["hold_browser_secs"] = secs
+            self.hold_btn.setText(f"Hold: {new_mode}")
+            self.hold_btn.setStyleSheet("background-color: transparent; color: #38bdf8; font-size: 11px; padding: 3px 6px; border: 1px solid #243048; border-radius: 4px;")
+        self.append_log("INFO", f"Browser hold after test set to [{self.hold_btn.text()}]")
 
     def toggle_evidence(self):
         cur = self.settings.get("capture_evidence", True)
@@ -5238,6 +5283,21 @@ class ConduitMainWindow(QMainWindow):
         retries = self.settings.get("retries", 0)
         device = self.settings.get("device", "Desktop 1280x800")
         workers = self.settings.get("workers", 1)
+
+        if not self.headless:
+            hold_mode = self.settings.get("hold_browser_mode", "3s")
+            if hold_mode == "Keep Open":
+                os.environ["CONDUIT_HOLD_BROWSER"] = "manual"
+            else:
+                os.environ.pop("CONDUIT_HOLD_BROWSER", None)
+                os.environ["CONDUIT_HOLD_BROWSER_SECS"] = str(self.settings.get("hold_browser_secs", 3))
+                os.environ["CONDUIT_HOLD_ON_FAILURE_SECS"] = str(self.settings.get("hold_on_failure_secs", 5))
+            os.environ["CONDUIT_SLOWMO_MS"] = str(self.settings.get("slowmo_ms", 500))
+        else:
+            os.environ["CONDUIT_HOLD_BROWSER_SECS"] = "0"
+            os.environ["CONDUIT_HOLD_ON_FAILURE_SECS"] = "0"
+            os.environ["CONDUIT_SLOWMO_MS"] = "0"
+            os.environ.pop("CONDUIT_HOLD_BROWSER", None)
 
         self.runner.run_tests_async(
             test_file_paths=test_files,

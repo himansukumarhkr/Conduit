@@ -28,38 +28,53 @@ class CatalogManager:
         conftest_path = os.path.join(self.workspace_dir, "conftest.py")
         if not os.path.exists(conftest_path):
             conftest_code = """import os
+import time
 import pytest
 from app.core.evidence_manager import EvidenceCollector
 
 @pytest.fixture(autouse=True)
 def conduit_step_evidence(request):
+    has_page = "page" in request.fixturenames
+    page = request.getfixturevalue("page") if has_page else None
+    collector = None
+
     enabled = os.environ.get("CONDUIT_CAPTURE_EVIDENCE", "0") == "1"
-    if not enabled or "page" not in request.fixturenames:
-        yield
-        return
+    if enabled and page:
+        workspace = os.environ.get("CONDUIT_WORKSPACE", os.getcwd())
+        scenario_name = request.node.name
+        format_mode = os.environ.get("CONDUIT_EVIDENCE_FORMAT", "both")
+        env = os.environ.get("CONDUIT_ENV", "QA")
+        browser = os.environ.get("CONDUIT_BROWSER", "msedge")
 
-    page = request.getfixturevalue("page")
-
-    workspace = os.environ.get("CONDUIT_WORKSPACE", os.getcwd())
-    scenario_name = request.node.name
-    format_mode = os.environ.get("CONDUIT_EVIDENCE_FORMAT", "both")
-    env = os.environ.get("CONDUIT_ENV", "QA")
-    browser = os.environ.get("CONDUIT_BROWSER", "msedge")
-
-    collector = EvidenceCollector(
-        workspace_dir=workspace,
-        scenario_name=scenario_name,
-        format_mode=format_mode,
-        env=env,
-        browser=browser
-    )
-    collector.attach(page)
+        collector = EvidenceCollector(
+            workspace_dir=workspace,
+            scenario_name=scenario_name,
+            format_mode=format_mode,
+            env=env,
+            browser=browser
+        )
+        collector.attach(page)
 
     yield
 
     rep_call = getattr(request.node, "rep_call", None)
     passed = rep_call.passed if rep_call else True
-    collector.finalize(test_passed=passed)
+    if collector:
+        collector.finalize(test_passed=passed)
+
+    if page and os.environ.get("CONDUIT_HEADLESS", "0") != "1":
+        try:
+            hold_mode = os.environ.get("CONDUIT_HOLD_BROWSER", "").lower()
+            if hold_mode in ("manual", "open", "keep_open", "inspect"):
+                page.wait_for_event("close", timeout=600000)
+            else:
+                hold_secs = float(os.environ.get("CONDUIT_HOLD_BROWSER_SECS", "3"))
+                if not passed:
+                    hold_secs = max(hold_secs, float(os.environ.get("CONDUIT_HOLD_ON_FAILURE_SECS", "5")))
+                if hold_secs > 0:
+                    time.sleep(hold_secs)
+        except Exception:
+            pass
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):
@@ -119,6 +134,12 @@ def test_data():
                     data = json.load(f)
                     self.scenarios = data.get("scenarios", [])
                     self._normalize_scenarios()
+                    for sc in self.scenarios:
+                        for page in sc.get("pages", []):
+                            p_file = page.get("file_name")
+                            if p_file and not os.path.exists(os.path.join(self.pages_dir, p_file)):
+                                self._write_scenario_files(sc)
+                                break
                     return
             except Exception as e:
                 print(f"[Catalog Load Error]: {e}")
