@@ -363,6 +363,26 @@ class ASTNormalizer:
             if not has_vars_stmt:
                 lines.insert(fn_def_idx + 1, vars_stmt)
 
+            if not any("def test_data" in l for l in lines):
+                insert_idx = fn_def_idx
+                while insert_idx > 0 and lines[insert_idx - 1].strip().startswith("@"):
+                    insert_idx -= 1
+                fixture_lines = [
+                    "@pytest.fixture",
+                    "def test_data():",
+                    "    try:",
+                    "        from app.core.test_data_manager import TestDataManager",
+                    "        import os",
+                    "        workspace = os.environ.get('CONDUIT_WORKSPACE', os.getcwd())",
+                    "        env = os.environ.get('CONDUIT_ENV', 'QA')",
+                    "        return TestDataManager(workspace).get_environment_data(env)",
+                    "    except Exception:",
+                    "        return {}",
+                    ""
+                ]
+                for offset, fl in enumerate(fixture_lines):
+                    lines.insert(insert_idx + offset, fl)
+
         for st in step_list:
             st_code = (st.get("code") or "").strip()
             if not st_code:

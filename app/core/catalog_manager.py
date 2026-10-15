@@ -26,11 +26,13 @@ class CatalogManager:
                 with open(init_file, "w", encoding="utf-8") as f:
                     f.write('pass\n')
         conftest_path = os.path.join(self.workspace_dir, "conftest.py")
-        if not os.path.exists(conftest_path):
-            conftest_code = """import os
+        conftest_code = """import os
 import time
 import pytest
 from app.core.evidence_manager import EvidenceCollector
+
+def pytest_configure(config):
+    config.addinivalue_line("filterwarnings", "ignore::pytest.PytestUnknownMarkWarning")
 
 @pytest.fixture(autouse=True)
 def conduit_step_evidence(request):
@@ -57,8 +59,14 @@ def conduit_step_evidence(request):
 
     yield
 
+    rep_setup = getattr(request.node, "rep_setup", None)
     rep_call = getattr(request.node, "rep_call", None)
-    passed = rep_call.passed if rep_call else True
+    passed = True
+    if rep_setup and not rep_setup.passed:
+        passed = False
+    elif rep_call and not rep_call.passed:
+        passed = False
+
     if collector:
         collector.finalize(test_passed=passed)
 
@@ -109,6 +117,16 @@ def test_data():
     mgr = TestDataManager(workspace)
     return mgr.get_environment_data(env)
 """
+        should_write = not os.path.exists(conftest_path)
+        if not should_write:
+            try:
+                with open(conftest_path, "r", encoding="utf-8") as f:
+                    c = f.read()
+                if "def test_data" not in c or "CONDUIT_HOLD_BROWSER" not in c or "rep_setup" not in c:
+                    should_write = True
+            except Exception:
+                should_write = True
+        if should_write:
             with open(conftest_path, "w", encoding="utf-8") as f:
                 f.write(conftest_code)
 

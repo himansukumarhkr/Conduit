@@ -56,16 +56,19 @@ class TestRunner:
             "-v",
             "--tb=short",
             "-s",
+            "-o", "filterwarnings=ignore::pytest.PytestUnknownMarkWarning",
+            "-p", "app.core.pytest_plugin",
             browser_channel_arg,
             "--headed" if not headless else "",
             f"--slowmo={slowmo}" if not headless and slowmo > 0 else ""
         ]
         cmd = [arg for arg in cmd if arg]
 
+        conduit_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         env_vars = os.environ.copy()
         env_vars["CONDUIT_ENV"] = env
         env_vars["TESTFLOW_ENV"] = env
-        env_vars["PYTHONPATH"] = f"{self.workspace_dir}{os.pathsep}{os.getcwd()}"
+        env_vars["PYTHONPATH"] = f"{self.workspace_dir}{os.pathsep}{conduit_root}{os.pathsep}{os.getcwd()}"
         env_vars["CONDUIT_WORKSPACE"] = self.workspace_dir
         env_vars["CONDUIT_BROWSER"] = browser
         env_vars["CONDUIT_DEVICE"] = device

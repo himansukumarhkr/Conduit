@@ -5,6 +5,20 @@ from {{ pom_import.module }} import {{ pom_import.class_name }}
 {% endfor %}
 
 
+{% if has_variables %}
+@pytest.fixture
+def test_data():
+    try:
+        from app.core.test_data_manager import TestDataManager
+        import os
+        workspace = os.environ.get("CONDUIT_WORKSPACE", os.getcwd())
+        env = os.environ.get("CONDUIT_ENV", "QA")
+        return TestDataManager(workspace).get_environment_data(env)
+    except Exception:
+        return {}
+{% endif %}
+
+
 {% for tag in tags %}
 @pytest.mark.{{ tag }}
 {% endfor %}
