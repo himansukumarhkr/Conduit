@@ -1,7 +1,7 @@
 import ast
 import re
 from urllib.parse import urlparse
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from jinja2 import Environment, FileSystemLoader
 import os
 import sys
@@ -106,14 +106,17 @@ class ASTNormalizer:
                 if method_name not in page_data["methods"]:
                     page_data["methods"][method_name] = method_info
 
-            processed_steps.append({
+            step_dict = {
                 "human_description": norm_action.get("human_description", ""),
                 "code": step_code if step_code and step_code != "pass" else raw_code,
                 "action": act_type,
                 "page_name": current_page_name,
                 "value": val,
                 "selector_info": sel
-            })
+            }
+            if norm_action.get("variable_name"):
+                step_dict["variable_name"] = norm_action["variable_name"]
+            processed_steps.append(step_dict)
 
         generated_pages = []
         pom_template = self.jinja_env.get_template("page_object.py.jinja")
@@ -144,6 +147,11 @@ class ASTNormalizer:
             for p in pages_dict.values()
         ]
 
+        has_variables = any(
+            ("vars.get(" in (s.get("code") or "")) or bool(s.get("variable_name"))
+            for s in processed_steps
+        )
+
         test_code = test_template.render(
             scenario_name=scenario_name,
             scenario_description=scenario_description or f"Test scenario for {scenario_name}",
@@ -151,7 +159,8 @@ class ASTNormalizer:
             test_func_name=test_func_name,
             pom_imports=pom_imports,
             pom_instantiations=pom_instantiations,
-            steps=processed_steps
+            steps=processed_steps,
+            has_variables=has_variables
         )
         ast.parse(test_code)
 
@@ -163,12 +172,30 @@ class ASTNormalizer:
             "steps": processed_steps
         }
 
+    @classmethod
+    def _get_variable_info(cls, action: Dict[str, Any], val: Any) -> Tuple[Optional[str], str]:
+        var_key = action.get("variable_name")
+        val_str = str(val) if val is not None else ""
+        if not var_key:
+            m = re.match(r'^\{\{\s*([a-zA-Z0-9_]+)\s*\}\}$', val_str)
+            if m:
+                var_key = m.group(1)
+            elif val_str.startswith("$") and len(val_str) > 1 and not val_str.startswith("$$"):
+                var_key = val_str[1:].strip()
+        fallback = action.get("fallback_value") or action.get("default_value") or ""
+        if not fallback and not val_str.startswith("{{") and not val_str.startswith("$") and val_str != var_key:
+            fallback = val_str
+        return (var_key, fallback)
+
     def _synthesize_step_and_method(
         self, page_class: str, act_type: str, var_name: str, val: str, action: Dict[str, Any]
     ) -> Tuple[str, Dict[str, Any]]:
         page_var = self._to_snake(page_class)
+        var_key, fallback_val = self._get_variable_info(action, val)
 
         if act_type == "navigate":
+            if var_key:
+                return f'page.goto(vars.get("{var_key}", "{fallback_val}"))', None
             return f'page.goto("{val}")', None
 
         elif act_type == "wait":
@@ -180,12 +207,18 @@ class ASTNormalizer:
             return f'page.screenshot(path="{path_val}")', None
 
         elif act_type == "assert_title":
+            if var_key:
+                return f'expect(page).to_have_title(vars.get("{var_key}", "{fallback_val}"))', None
             return f'expect(page).to_have_title("{val}")', None
 
         elif act_type == "assert_url":
+            if var_key:
+                return f'expect(page).to_have_url(vars.get("{var_key}", "{fallback_val}"))', None
             return f'expect(page).to_have_url("{val}")', None
 
         elif act_type == "api_request":
+            if var_key:
+                return f'page.request.get(vars.get("{var_key}", "{fallback_val}"))', None
             return f'page.request.get("{val}")', None
 
         elif act_type == "click":
@@ -207,7 +240,10 @@ class ASTNormalizer:
                 "docstring": "",
                 "body_lines": [f"self.{var_name}.fill(value)"]
             }
-            step_code = f'{page_var}.{method_name}("{val}")'
+            if var_key:
+                step_code = f'{page_var}.{method_name}(vars.get("{var_key}", "{fallback_val}"))'
+            else:
+                step_code = f'{page_var}.{method_name}("{val}")'
             return step_code, method
 
         elif act_type == "assert_visible":
@@ -229,7 +265,10 @@ class ASTNormalizer:
                 "docstring": "",
                 "body_lines": [f"expect(self.{var_name}).to_contain_text(expected_text)"]
             }
-            step_code = f'{page_var}.{method_name}("{val}")'
+            if var_key:
+                step_code = f'{page_var}.{method_name}(vars.get("{var_key}", "{fallback_val}"))'
+            else:
+                step_code = f'{page_var}.{method_name}("{val}")'
             return step_code, method
 
         elif act_type == "assert_value":
@@ -240,7 +279,10 @@ class ASTNormalizer:
                 "docstring": "",
                 "body_lines": [f"expect(self.{var_name}).to_have_value(expected_val)"]
             }
-            step_code = f'{page_var}.{method_name}("{val}")'
+            if var_key:
+                step_code = f'{page_var}.{method_name}(vars.get("{var_key}", "{fallback_val}"))'
+            else:
+                step_code = f'{page_var}.{method_name}("{val}")'
             return step_code, method
 
         elif act_type == "press":
@@ -251,7 +293,10 @@ class ASTNormalizer:
                 "docstring": "",
                 "body_lines": [f"self.{var_name}.press(key)"]
             }
-            step_code = f'{page_var}.{method_name}("{val}")'
+            if var_key:
+                step_code = f'{page_var}.{method_name}(vars.get("{var_key}", "{fallback_val}"))'
+            else:
+                step_code = f'{page_var}.{method_name}("{val}")'
             return step_code, method
 
         return "pass", None
@@ -280,6 +325,33 @@ class ASTNormalizer:
         raw_act = str(data.get("action") or "").lower().strip()
         val = data.get("value")
         sel = data.get("selector_info")
+        env_var = data.get("variable_name")
+
+        if not env_var and val is not None:
+            v_str = str(val).strip()
+            if v_str.startswith("{{") and v_str.endswith("}}"):
+                env_var = v_str[2:-2].strip()
+            elif v_str.startswith("$") and len(v_str) > 1 and not v_str.startswith("$$"):
+                env_var = v_str[1:].strip()
+
+        if not env_var and code:
+            m_code = re.search(r'vars\.get\(["\']([^"\']+)["\']', code)
+            if m_code:
+                env_var = m_code.group(1)
+                if not val or val == "None":
+                    val = f"{{{{{env_var}}}}}"
+
+        if not env_var and desc:
+            m_desc = re.search(r"variable ['\"]([^'\"]+)['\"]", desc)
+            if m_desc:
+                env_var = m_desc.group(1)
+                if not val or val == "None":
+                    val = f"{{{{{env_var}}}}}"
+
+        if env_var:
+            data["variable_name"] = env_var
+            if val is None or str(val) == "":
+                val = f"{{{{{env_var}}}}}"
 
         valid_acts = [
             "click", "fill", "navigate", "press", "wait", "take_screenshot",
@@ -366,7 +438,7 @@ class ASTNormalizer:
 
         if not isinstance(sel, dict) or not sel.get("var_name"):
             display_val = ""
-            var_name = ""
+            elem_var_name = ""
             if act == "fill":
                 m = re.search(r"into '([^']*)'", desc)
                 if not m:
@@ -376,8 +448,8 @@ class ASTNormalizer:
                 else:
                     m2 = re.search(r'\.fill_([a-zA-Z0-9_]+)\(', code)
                     if m2:
-                        var_name = m2.group(1)
-                        display_val = var_name.replace("_", " ")
+                        elem_var_name = m2.group(1)
+                        display_val = elem_var_name.replace("_", " ")
             elif act == "click":
                 m = re.search(r"Click '([^']*)'", desc)
                 if m:
@@ -385,8 +457,8 @@ class ASTNormalizer:
                 else:
                     m2 = re.search(r'\.click_([a-zA-Z0-9_]+)\(', code)
                     if m2:
-                        var_name = m2.group(1)
-                        display_val = var_name.replace("_", " ")
+                        elem_var_name = m2.group(1)
+                        display_val = elem_var_name.replace("_", " ")
             elif act == "press":
                 m = re.search(r"on '([^']*)'", desc)
                 if m:
@@ -394,8 +466,8 @@ class ASTNormalizer:
                 else:
                     m2 = re.search(r'\.press_([a-zA-Z0-9_]+)\(', code)
                     if m2:
-                        var_name = m2.group(1)
-                        display_val = var_name.replace("_", " ")
+                        elem_var_name = m2.group(1)
+                        display_val = elem_var_name.replace("_", " ")
             elif "assert" in act:
                 m = re.search(r"'([^']*)'", desc)
                 if not m:
@@ -405,16 +477,16 @@ class ASTNormalizer:
                 else:
                     m2 = re.search(r'\.assert_([a-zA-Z0-9_]+)_', code)
                     if m2:
-                        var_name = m2.group(1)
-                        display_val = var_name.replace("_", " ")
+                        elem_var_name = m2.group(1)
+                        display_val = elem_var_name.replace("_", " ")
 
-            if not var_name and display_val:
-                var_name = SelectorEngine.clean_identifier(display_val)
-            if not display_val and var_name:
-                display_val = var_name.replace("_", " ")
+            if not elem_var_name and display_val:
+                elem_var_name = SelectorEngine.clean_identifier(display_val)
+            if not display_val and elem_var_name:
+                display_val = elem_var_name.replace("_", " ")
 
-            if display_val or var_name:
-                sel = SelectorEngine.create_custom_selector("css", display_val or var_name, var_name)
+            if display_val or elem_var_name:
+                sel = SelectorEngine.create_custom_selector("css", display_val or elem_var_name, elem_var_name)
             else:
                 sel = sel if isinstance(sel, dict) else {}
 
@@ -423,74 +495,132 @@ class ASTNormalizer:
         data["selector_info"] = sel
         data["human_description"] = desc
         data["code"] = code
+        if env_var:
+            data["variable_name"] = env_var
         return data
+
+    @classmethod
+    def _extract_arg_and_variable(cls, node: ast.AST) -> Tuple[str, Optional[str]]:
+        if node is None:
+            return ("", None)
+        if isinstance(node, ast.Constant):
+            return (str(node.value), None)
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "get":
+                var_key = None
+                fallback = ""
+                if node.args and isinstance(node.args[0], ast.Constant):
+                    var_key = str(node.args[0].value)
+                if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+                    fallback = str(node.args[1].value)
+                if var_key:
+                    return (f"{{{{{var_key}}}}}", var_key)
+            try:
+                return (ast.unparse(node), None)
+            except Exception:
+                return ("", None)
+        if isinstance(node, ast.Subscript):
+            if isinstance(node.slice, ast.Constant):
+                var_key = str(node.slice.value)
+                return (f"{{{{{var_key}}}}}", var_key)
+        if isinstance(node, ast.Name):
+            return (node.id, None)
+        try:
+            return (ast.unparse(node), None)
+        except Exception:
+            return ("", None)
 
     @classmethod
     def _call_to_step_dict(cls, call_node: ast.Call, raw_call: str) -> Dict[str, Any]:
         if "page.goto" in raw_call:
-            arg = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else "URL"
-            return {
-                "human_description": f"Navigate to {arg}",
+            arg_node = call_node.args[0] if call_node.args else None
+            val, var_name = cls._extract_arg_and_variable(arg_node)
+            desc = f"Navigate to variable '{var_name}'" if var_name else f"Navigate to {val or 'URL'}"
+            res = {
+                "human_description": desc,
                 "code": raw_call,
                 "action": "navigate",
-                "value": str(arg),
+                "value": val or "URL",
                 "selector_info": {}
             }
+            if var_name:
+                res["variable_name"] = var_name
+            return res
         if "wait_for_timeout" in raw_call:
-            arg = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else "1000"
-            return {
-                "human_description": f"Wait for {arg}ms",
+            arg_node = call_node.args[0] if call_node.args else None
+            val, var_name = cls._extract_arg_and_variable(arg_node)
+            res = {
+                "human_description": f"Wait for {val or '1000'}ms",
                 "code": raw_call,
                 "action": "wait",
-                "value": str(arg),
+                "value": str(val or "1000"),
                 "selector_info": {}
             }
+            if var_name:
+                res["variable_name"] = var_name
+            return res
         if "screenshot" in raw_call:
-            arg = ""
-            if call_node.args and hasattr(call_node.args[0], 'value'):
-                arg = str(call_node.args[0].value)
+            arg_node = call_node.args[0] if call_node.args else None
+            val, var_name = cls._extract_arg_and_variable(arg_node)
             for kw in getattr(call_node, 'keywords', []):
-                if kw.arg == "path" and hasattr(kw.value, 'value'):
-                    arg = str(kw.value.value)
-            return {
+                if kw.arg == "path":
+                    val, var_name = cls._extract_arg_and_variable(kw.value)
+            res = {
                 "human_description": f"Take screenshot: {raw_call}",
                 "code": raw_call,
                 "action": "take_screenshot",
-                "value": arg or "evidence_screenshot.png",
+                "value": val or "evidence_screenshot.png",
                 "selector_info": {}
             }
+            if var_name:
+                res["variable_name"] = var_name
+            return res
         if "to_have_title" in raw_call:
-            arg = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else ""
-            return {
-                "human_description": f"Assert page title equals '{arg}'",
+            arg_node = call_node.args[0] if call_node.args else None
+            val, var_name = cls._extract_arg_and_variable(arg_node)
+            desc = f"Assert page title equals variable '{var_name}'" if var_name else f"Assert page title equals '{val}'"
+            res = {
+                "human_description": desc,
                 "code": raw_call,
                 "action": "assert_title",
-                "value": str(arg),
+                "value": str(val),
                 "selector_info": {}
             }
+            if var_name:
+                res["variable_name"] = var_name
+            return res
         if "to_have_url" in raw_call:
-            arg = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else ""
-            return {
-                "human_description": f"Assert page URL matches '{arg}'",
+            arg_node = call_node.args[0] if call_node.args else None
+            val, var_name = cls._extract_arg_and_variable(arg_node)
+            desc = f"Assert page URL matches variable '{var_name}'" if var_name else f"Assert page URL matches '{val}'"
+            res = {
+                "human_description": desc,
                 "code": raw_call,
                 "action": "assert_url",
-                "value": str(arg),
+                "value": str(val),
                 "selector_info": {}
             }
+            if var_name:
+                res["variable_name"] = var_name
+            return res
         if "page.request" in raw_call:
-            arg = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else ""
-            return {
+            arg_node = call_node.args[0] if call_node.args else None
+            val, var_name = cls._extract_arg_and_variable(arg_node)
+            res = {
                 "human_description": f"API Request: {raw_call}",
                 "code": raw_call,
                 "action": "api_request",
-                "value": str(arg),
+                "value": str(val),
                 "selector_info": {}
             }
+            if var_name:
+                res["variable_name"] = var_name
+            return res
         if "click" in raw_call:
             func_name = getattr(call_node.func, "attr", "")
             target_raw = func_name.replace("click_", "").replace("_", " ") if func_name.startswith("click_") else "element"
-            var_name = func_name.replace("click_", "") if func_name.startswith("click_") else "element"
-            sel_info = SelectorEngine.create_custom_selector("css", target_raw or var_name, var_name)
+            elem_var_name = func_name.replace("click_", "") if func_name.startswith("click_") else "element"
+            sel_info = SelectorEngine.create_custom_selector("css", target_raw or elem_var_name, elem_var_name)
             return {
                 "human_description": f"Click '{target_raw}' button" if target_raw else "Click element",
                 "code": raw_call,
@@ -501,35 +631,44 @@ class ASTNormalizer:
         if "fill" in raw_call:
             func_name = getattr(call_node.func, "attr", "")
             target_raw = func_name.replace("fill_", "").replace("_", " ") if func_name.startswith("fill_") else "element"
-            var_name = func_name.replace("fill_", "") if func_name.startswith("fill_") else "element"
-            val = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else ""
-            sel_info = SelectorEngine.create_custom_selector("css", target_raw or var_name, var_name)
-            return {
-                "human_description": f"Type '{val}' into '{target_raw}'",
+            elem_var_name = func_name.replace("fill_", "") if func_name.startswith("fill_") else "element"
+            arg_node = call_node.args[0] if call_node.args else None
+            val, var_name = cls._extract_arg_and_variable(arg_node)
+            sel_info = SelectorEngine.create_custom_selector("css", target_raw or elem_var_name, elem_var_name)
+            desc = f"Fill '{target_raw}' with variable '{var_name}'" if var_name else f"Type '{val}' into '{target_raw}'"
+            res = {
+                "human_description": desc,
                 "code": raw_call,
                 "action": "fill",
                 "value": str(val),
                 "selector_info": sel_info
             }
+            if var_name:
+                res["variable_name"] = var_name
+            return res
         if "press" in raw_call:
             func_name = getattr(call_node.func, "attr", "")
             target_raw = func_name.replace("press_", "").replace("_", " ") if func_name.startswith("press_") else "element"
-            var_name = func_name.replace("press_", "") if func_name.startswith("press_") else "element"
-            val = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else "Enter"
-            sel_info = SelectorEngine.create_custom_selector("css", target_raw or var_name, var_name)
-            return {
-                "human_description": f"Press key '{val}' on '{target_raw}'" if target_raw else f"Press key '{val}'",
+            elem_var_name = func_name.replace("press_", "") if func_name.startswith("press_") else "element"
+            arg_node = call_node.args[0] if call_node.args else None
+            val, var_name = cls._extract_arg_and_variable(arg_node)
+            sel_info = SelectorEngine.create_custom_selector("css", target_raw or elem_var_name, elem_var_name)
+            res = {
+                "human_description": f"Press key '{val or 'Enter'}' on '{target_raw}'" if target_raw else f"Press key '{val or 'Enter'}'",
                 "code": raw_call,
                 "action": "press",
-                "value": str(val),
+                "value": str(val or "Enter"),
                 "selector_info": sel_info
             }
+            if var_name:
+                res["variable_name"] = var_name
+            return res
         if "assert" in raw_call or "expect" in raw_call:
             func_name = getattr(call_node.func, "attr", "")
             if "visible" in raw_call:
                 target_raw = func_name.replace("assert_", "").replace("_visible", "").replace("_", " ")
-                var_name = SelectorEngine.clean_identifier(target_raw)
-                sel_info = SelectorEngine.create_custom_selector("css", target_raw or var_name, var_name)
+                elem_var_name = SelectorEngine.clean_identifier(target_raw)
+                sel_info = SelectorEngine.create_custom_selector("css", target_raw or elem_var_name, elem_var_name)
                 return {
                     "human_description": f"Assert '{target_raw}' is visible",
                     "code": raw_call,
@@ -539,28 +678,38 @@ class ASTNormalizer:
                 }
             elif "text" in raw_call:
                 target_raw = func_name.replace("assert_", "").replace("_contains_text", "").replace("_", " ")
-                var_name = SelectorEngine.clean_identifier(target_raw)
-                val = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else ""
-                sel_info = SelectorEngine.create_custom_selector("css", target_raw or var_name, var_name)
-                return {
-                    "human_description": f"Assert '{target_raw}' contains text '{val}'",
+                elem_var_name = SelectorEngine.clean_identifier(target_raw)
+                arg_node = call_node.args[0] if call_node.args else None
+                val, var_name = cls._extract_arg_and_variable(arg_node)
+                sel_info = SelectorEngine.create_custom_selector("css", target_raw or elem_var_name, elem_var_name)
+                desc = f"Assert '{target_raw}' contains variable '{var_name}'" if var_name else f"Assert '{target_raw}' contains text '{val}'"
+                res = {
+                    "human_description": desc,
                     "code": raw_call,
                     "action": "assert_text",
                     "value": str(val),
                     "selector_info": sel_info
                 }
+                if var_name:
+                    res["variable_name"] = var_name
+                return res
             elif "value" in raw_call:
                 target_raw = func_name.replace("assert_", "").replace("_has_value", "").replace("_", " ")
-                var_name = SelectorEngine.clean_identifier(target_raw)
-                val = call_node.args[0].value if call_node.args and hasattr(call_node.args[0], 'value') else ""
-                sel_info = SelectorEngine.create_custom_selector("css", target_raw or var_name, var_name)
-                return {
-                    "human_description": f"Assert '{target_raw}' has value '{val}'",
+                elem_var_name = SelectorEngine.clean_identifier(target_raw)
+                arg_node = call_node.args[0] if call_node.args else None
+                val, var_name = cls._extract_arg_and_variable(arg_node)
+                sel_info = SelectorEngine.create_custom_selector("css", target_raw or elem_var_name, elem_var_name)
+                desc = f"Assert '{target_raw}' equals variable '{var_name}'" if var_name else f"Assert '{target_raw}' has value '{val}'"
+                res = {
+                    "human_description": desc,
                     "code": raw_call,
                     "action": "assert_value",
                     "value": str(val),
                     "selector_info": sel_info
                 }
+                if var_name:
+                    res["variable_name"] = var_name
+                return res
             else:
                 return {
                     "human_description": f"Assert verification: {raw_call}",

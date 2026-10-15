@@ -9,3 +9,4 @@ build/
 tests_workspace/
 build_cython/
 *.pyd
+test_data/

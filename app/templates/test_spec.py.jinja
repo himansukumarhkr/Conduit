@@ -8,7 +8,12 @@ from {{ pom_import.module }} import {{ pom_import.class_name }}
 {% for tag in tags %}
 @pytest.mark.{{ tag }}
 {% endfor %}
+{% if has_variables %}
+def {{ test_func_name }}(page: Page, test_data):
+    vars = test_data.get("variables", {}) if isinstance(test_data, dict) else {}
+{% else %}
 def {{ test_func_name }}(page: Page):
+{% endif %}
 {% for inst in pom_instantiations %}
     {{ inst }}
 {% endfor %}

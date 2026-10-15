@@ -536,9 +536,25 @@ class RecordDialog(QDialog):
 
 
 class StepEditorDialog(QDialog):
-    def __init__(self, step_data: dict = None, parent=None):
+    def __init__(self, step_data: dict = None, available_vars: dict = None, parent=None):
         super().__init__(parent)
         self.step_data = ASTNormalizer.normalize_step(step_data or {})
+        if available_vars is None and parent and hasattr(parent, "test_data_mgr") and hasattr(parent, "current_env"):
+            try:
+                env_data = parent.test_data_mgr.get_environment_data(parent.current_env)
+                available_vars = env_data.get("variables", {}) if env_data else {}
+            except Exception:
+                available_vars = {}
+        if available_vars is None:
+            try:
+                from app.core.test_data_manager import TestDataManager
+                mgr = TestDataManager(os.getcwd())
+                env_data = mgr.get_environment_data(mgr.get_active_environment())
+                available_vars = env_data.get("variables", {}) if env_data else {}
+            except Exception:
+                available_vars = {}
+        self.available_vars = available_vars or {}
+        self.selected_variable_name = self.step_data.get("variable_name")
         self.setWindowTitle("Edit Flow Step" if step_data else "Add New Flow Step")
         self.resize(540, 560)
         self.setStyleSheet("""
@@ -690,12 +706,43 @@ class StepEditorDialog(QDialog):
         layout.addWidget(self.selector_frame)
 
         cur_val = self.step_data.get("value", "")
+        if self.selected_variable_name and not cur_val:
+            cur_val = f"{{{{{self.selected_variable_name}}}}}"
 
         self.val_lbl = QLabel("Value / Parameter")
         layout.addWidget(self.val_lbl)
+
+        val_row = QHBoxLayout()
+        val_row.setSpacing(6)
         self.val_edit = QLineEdit(str(cur_val))
         self.val_edit.setPlaceholderText("e.g. test string, {{username}}, https://..., 1000")
-        layout.addWidget(self.val_edit)
+        self.val_edit.textChanged.connect(self._on_val_changed)
+        val_row.addWidget(self.val_edit, 1)
+
+        self.btn_insert_var = QPushButton("📋 Insert Variable ▾")
+        self.btn_insert_var.setCursor(Qt.PointingHandCursor)
+        self.btn_insert_var.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                border: 1px solid #38bdf8;
+                color: #38bdf8;
+                font-size: 11px;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-height: 36px;
+            }
+            QPushButton:hover {
+                background-color: #0284c7;
+                color: #ffffff;
+            }
+        """)
+        self.btn_insert_var.clicked.connect(self._show_variable_menu)
+        val_row.addWidget(self.btn_insert_var)
+        layout.addLayout(val_row)
+
+        self.var_badge_lbl = QLabel()
+        layout.addWidget(self.var_badge_lbl)
 
         layout.addWidget(QLabel("Step Description (Leave blank to auto-generate)"))
         self.desc_edit = QLineEdit(desc)
@@ -703,6 +750,7 @@ class StepEditorDialog(QDialog):
         layout.addWidget(self.desc_edit)
 
         self._on_action_changed()
+        self._on_val_changed()
 
         layout.addStretch()
 
@@ -720,6 +768,65 @@ class StepEditorDialog(QDialog):
         save_btn.clicked.connect(self.on_save)
         btn_box.addWidget(save_btn)
         layout.addLayout(btn_box)
+
+    def _show_variable_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #0f172a;
+                border: 1px solid #334155;
+                border-radius: 8px;
+                padding: 6px;
+                color: #e2e8f0;
+                font-size: 12px;
+            }
+            QMenu::item {
+                padding: 6px 14px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #1e293b;
+                color: #38bdf8;
+            }
+        """)
+        if not self.available_vars:
+            act = menu.addAction("No variables in active environment")
+            act.setEnabled(False)
+        else:
+            for k, v in self.available_vars.items():
+                disp_val = "********" if ("pass" in k.lower() or "secret" in k.lower()) else str(v)
+                act = menu.addAction(f"{k}   ({disp_val})")
+                act.triggered.connect(lambda _, key=k: self._apply_variable(key))
+        menu.exec(self.btn_insert_var.mapToGlobal(QPoint(0, self.btn_insert_var.height())))
+
+    def _apply_variable(self, key: str):
+        self.selected_variable_name = key
+        self.val_edit.setText(f"{{{{{key}}}}}")
+        self._on_val_changed()
+
+    def _on_val_changed(self):
+        text = self.val_edit.text().strip()
+        var_name = None
+        if text.startswith("{{") and text.endswith("}}"):
+            var_name = text[2:-2].strip()
+        elif text.startswith("$") and len(text) > 1 and not text.startswith("$$"):
+            var_name = text[1:].strip()
+        elif self.available_vars and text in self.available_vars:
+            var_name = text
+        elif self.selected_variable_name and f"{{{{{self.selected_variable_name}}}}}" in text:
+            var_name = self.selected_variable_name
+
+        if var_name:
+            self.selected_variable_name = var_name
+            val_preview = self.available_vars.get(var_name, "Active Env Variable")
+            if isinstance(val_preview, str) and ("pass" in var_name.lower() or "secret" in var_name.lower()):
+                val_preview = "********"
+            self.var_badge_lbl.setText(f"✓ Using Environment Variable: <b>{var_name}</b> (Active value: {val_preview})")
+            self.var_badge_lbl.setStyleSheet("color: #34d399; font-size: 11px; font-weight: 500;")
+        else:
+            self.selected_variable_name = None
+            self.var_badge_lbl.setText("💡 Tip: Click '📋 Insert Variable ▾' or enter {{variable_name}} to bind to environment test data.")
+            self.var_badge_lbl.setStyleSheet("color: #64748b; font-size: 11px;")
 
     def _on_action_changed(self):
         act_key = self.action_combo.currentData()
@@ -781,6 +888,23 @@ class StepEditorDialog(QDialog):
 
         sel_info = SelectorEngine.create_custom_selector(strat, raw_sel or var_name, var_name)
         human_desc = self.desc_edit.text().strip()
+
+        env_var = None
+        if val.startswith("{{") and val.endswith("}}"):
+            env_var = val[2:-2].strip()
+        elif val.startswith("$") and len(val) > 1 and not val.startswith("$$"):
+            env_var = val[1:].strip()
+        elif self.selected_variable_name:
+            env_var = self.selected_variable_name
+        elif self.available_vars and val in self.available_vars:
+            env_var = val
+
+        if env_var:
+            val = f"{{{{{env_var}}}}}"
+            self.step_data["variable_name"] = env_var
+        else:
+            self.step_data.pop("variable_name", None)
+
         if not human_desc:
             human_desc = SelectorEngine.generate_human_step(act_key, sel_info, val)
 
@@ -4676,6 +4800,12 @@ class ConduitMainWindow(QMainWindow):
             act_badge.setStyleSheet(f"background-color: {bg}; color: {fg}; font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 4px; border: 1px solid {fg};")
             card_layout.addWidget(act_badge)
 
+            st_var = st.get("variable_name")
+            if st_var:
+                var_badge = QLabel(f"${st_var}")
+                var_badge.setStyleSheet("background-color: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 4px; border: 1px solid #38bdf8;")
+                card_layout.addWidget(var_badge)
+
             desc_text = st.get("human_description", f"Step {idx + 1}")
             desc_lbl = QLabel(desc_text)
             desc_lbl.setWordWrap(True)
@@ -4768,7 +4898,14 @@ class ConduitMainWindow(QMainWindow):
         sc = self.catalog.get_scenario(self.selected_scenario_id)
         if not sc:
             return
-        dlg = StepEditorDialog(parent=self)
+        avail_vars = {}
+        if hasattr(self, "test_data_mgr") and hasattr(self, "current_env"):
+            try:
+                env_data = self.test_data_mgr.get_environment_data(self.current_env)
+                avail_vars = env_data.get("variables", {}) if env_data else {}
+            except Exception:
+                avail_vars = {}
+        dlg = StepEditorDialog(available_vars=avail_vars, parent=self)
         if dlg.exec() == QDialog.Accepted:
             new_step = dlg.get_step_data()
             if "steps" not in sc:
@@ -4784,7 +4921,14 @@ class ConduitMainWindow(QMainWindow):
         if not sc or "steps" not in sc or step_idx >= len(sc["steps"]):
             return
         st = sc["steps"][step_idx]
-        dlg = StepEditorDialog(step_data=st, parent=self)
+        avail_vars = {}
+        if hasattr(self, "test_data_mgr") and hasattr(self, "current_env"):
+            try:
+                env_data = self.test_data_mgr.get_environment_data(self.current_env)
+                avail_vars = env_data.get("variables", {}) if env_data else {}
+            except Exception:
+                avail_vars = {}
+        dlg = StepEditorDialog(step_data=st, available_vars=avail_vars, parent=self)
         if dlg.exec() == QDialog.Accepted:
             sc["steps"][step_idx] = dlg.get_step_data()
             self._sync_scenario_steps_and_save(sc)

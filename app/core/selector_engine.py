@@ -201,30 +201,37 @@ class SelectorEngine:
         display = selector_info.get("display", "element") if selector_info else "element"
         var_name = selector_info.get("var_name", "element") if selector_info else "element"
         friendly_target = f"'{var_name.replace('_', ' ')}'"
+        str_val = str(value) if value is not None else ""
+        is_var = str_val.startswith("{{") and str_val.endswith("}}")
+        clean_var = str_val[2:-2].strip() if is_var else ""
 
         if action_type == "navigate":
-            return f"Navigate to {value}"
+            return f"Navigate to variable '{clean_var}'" if is_var else f"Navigate to {str_val}"
         elif action_type == "click":
             return f"Click {friendly_target}"
         elif action_type == "fill":
-            masked_val = "'********'" if "password" in var_name else f"'{value}'"
+            if is_var:
+                return f"Fill {friendly_target} with variable '{clean_var}'"
+            elif str_val.startswith("variable '"):
+                return f"Fill {friendly_target} with {str_val}"
+            masked_val = "'********'" if "password" in var_name else f"'{str_val}'"
             return f"Fill {friendly_target} with {masked_val}"
         elif action_type == "assert_visible":
             return f"Assert {friendly_target} is visible"
         elif action_type == "assert_text":
-            return f"Assert {friendly_target} contains text '{value}'"
+            return f"Assert {friendly_target} contains variable '{clean_var}'" if is_var else f"Assert {friendly_target} contains text '{str_val}'"
         elif action_type == "assert_value":
-            return f"Assert {friendly_target} has value '{value}'"
+            return f"Assert {friendly_target} equals variable '{clean_var}'" if is_var else f"Assert {friendly_target} has value '{str_val}'"
         elif action_type == "assert_title":
-            return f"Assert page title equals '{value}'"
+            return f"Assert page title equals variable '{clean_var}'" if is_var else f"Assert page title equals '{str_val}'"
         elif action_type == "assert_url":
-            return f"Assert page URL matches '{value}'"
+            return f"Assert page URL matches variable '{clean_var}'" if is_var else f"Assert page URL matches '{str_val}'"
         elif action_type == "wait":
-            return f"Wait for {value}ms"
+            return f"Wait for {str_val}ms"
         elif action_type == "take_screenshot":
-            return f"Take screenshot '{value}'"
+            return f"Take screenshot '{str_val}'"
         elif action_type == "api_request":
-            return f"API Request: {value}"
+            return f"API Request: {str_val}"
         elif action_type == "press":
-            return f"Press key '{value}' on {friendly_target}"
+            return f"Press key '{str_val}' on {friendly_target}"
         return f"Perform {action_type} on {friendly_target}"

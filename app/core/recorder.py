@@ -693,11 +693,20 @@ class BrowserRecorder:
                 val = event_data.get("value", "")
                 url = event_data.get("url", "")
                 var_name = event_data.get("variable_name")
+                if not var_name and getattr(self, "variables", None) and act_type == "fill":
+                    str_val = str(val).strip()
+                    for vk, vv in self.variables.items():
+                        if str_val and str(vv).strip() == str_val:
+                            var_name = vk
+                            break
 
                 selector_info = SelectorEngine.rank_selector(meta)
-                human_desc = SelectorEngine.generate_human_step(act_type, selector_info, val)
                 if var_name:
+                    if not val:
+                        val = f"{{{{{var_name}}}}}"
                     human_desc = f"Fill '{selector_info.get('display')}' with variable '{var_name}'"
+                else:
+                    human_desc = SelectorEngine.generate_human_step(act_type, selector_info, val)
 
                 if act_type == "fill" and self.recorded_actions:
                     last_action = self.recorded_actions[-1]
